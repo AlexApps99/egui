@@ -33,7 +33,6 @@ pub use painter::Painter;
 pub use epi::NativeOptions;
 
 use {
-    copypasta::ClipboardProvider,
     egui::*,
     glutin::{
         self,
@@ -42,7 +41,10 @@ use {
     std::hash::{Hash, Hasher},
 };
 
-pub use copypasta::ClipboardContext; // TODO: remove
+#[cfg(feature = "copypasta")]
+pub use copypasta::ClipboardContext;
+#[cfg(feature = "copypasta")]
+use copypasta::ClipboardProvider; // TODO: remove
 
 pub struct GlowInputState {
     pub pointer_pos_in_points: Option<Pos2>,
@@ -90,7 +92,7 @@ pub fn is_quit_event(input_state: &GlowInputState, event: &glutin::event::Window
 pub fn input_to_egui(
     pixels_per_point: f32,
     event: &glutin::event::WindowEvent<'_>,
-    clipboard: Option<&mut ClipboardContext>,
+    #[cfg(feature = "copypasta")] clipboard: Option<&mut ClipboardContext>,
     input_state: &mut GlowInputState,
 ) {
     use glutin::event::WindowEvent;
@@ -168,6 +170,7 @@ pub fn input_to_egui(
                     } else if is_copy_command(input_state.raw.modifiers, keycode) {
                         input_state.raw.events.push(Event::Copy);
                     } else if is_paste_command(input_state.raw.modifiers, keycode) {
+                        #[cfg(feature = "copypasta")]
                         if let Some(clipboard) = clipboard {
                             match clipboard.get_contents() {
                                 Ok(contents) => {
@@ -418,15 +421,17 @@ fn set_cursor_icon(window: &glutin::window::Window, cursor_icon: egui::CursorIco
 
 pub fn handle_output(
     output: egui::Output,
-    clipboard: Option<&mut ClipboardContext>,
+    #[cfg(feature = "copypasta")] clipboard: Option<&mut ClipboardContext>,
     window: &glutin::window::Window,
 ) {
+    #[cfg(feature = "webbrowser")]
     if let Some(open) = output.open_url {
         if let Err(err) = webbrowser::open(&open.url) {
             eprintln!("Failed to open url: {}", err);
         }
     }
 
+    #[cfg(feature = "copypasta")]
     if !output.copied_text.is_empty() {
         if let Some(clipboard) = clipboard {
             if let Err(err) = clipboard.set_contents(output.copied_text) {
@@ -440,6 +445,7 @@ pub fn handle_output(
     }
 }
 
+#[cfg(feature = "copypasta")]
 pub fn init_clipboard() -> Option<ClipboardContext> {
     match ClipboardContext::new() {
         Ok(clipboard) => Some(clipboard),
@@ -481,6 +487,7 @@ pub fn native_pixels_per_point(window: &glutin::window::Window) -> f32 {
 pub struct EguiGlow {
     egui_ctx: egui::CtxRef,
     start_time: std::time::Instant,
+    #[cfg(feature = "copypasta")]
     clipboard: Option<crate::ClipboardContext>,
     input_state: crate::GlowInputState,
     painter: crate::Painter,
@@ -496,6 +503,7 @@ impl EguiGlow {
         Self {
             egui_ctx: Default::default(),
             start_time: std::time::Instant::now(),
+            #[cfg(feature = "copypasta")]
             clipboard: crate::init_clipboard(),
             input_state: crate::GlowInputState::from_pixels_per_point(
                 crate::native_pixels_per_point(display.window()),
@@ -519,6 +527,7 @@ impl EguiGlow {
         crate::input_to_egui(
             self.egui_ctx.pixels_per_point(),
             event,
+            #[cfg(feature = "copypasta")]
             self.clipboard.as_mut(),
             &mut self.input_state,
         );
@@ -573,7 +582,12 @@ impl EguiGlow {
 
         let needs_repaint = egui_output.needs_repaint;
 
-        handle_output(egui_output, self.clipboard.as_mut(), window);
+        handle_output(
+            egui_output,
+            #[cfg(feature = "copypasta")]
+            self.clipboard.as_mut(),
+            window,
+        );
 
         (needs_repaint, shapes)
     }

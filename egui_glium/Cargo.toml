@@ -22,12 +22,12 @@ include = [
 all-features = true
 
 [dependencies]
-copypasta = "0.7"
+copypasta = { version = "0.7", optional = true }
 egui = { version = "0.14.0", path = "../egui", default-features = false, features = ["single_threaded"] }
 epi = { version = "0.14.0", path = "../epi" }
 glow = "0.11"
 glutin = "0.27"
-webbrowser = "0.5"
+webbrowser = { version = "0.5", optional = true }
 
 # feature "http":
 ureq = { version = "2.2", optional = true }
@@ -44,7 +44,7 @@ tts = { version = "0.17", optional = true }
 chrono = { version = "0.4", optional = true }
 
 [features]
-default = ["default_fonts"]
+default = ["default_fonts", "copypasta", "webbrowser"]
 
 # If set, egui will use `include_bytes!` to bundle some fonts.
 # If you plan on specifying your own fonts you may disable this feature.

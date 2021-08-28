@@ -1,4 +1,4 @@
-#![allow(deprecated)] // legacy implement_vertex macro
+#![allow(unsafe_code)]
 
 use egui::{
     emath::Rect,
@@ -8,7 +8,6 @@ use egui::{
 use glow::HasContext;
 
 // TODO proper error checking, memory leaks, etc
-#[allow(unsafe_code)]
 fn srgbtexture2d(
     gl: &glow::Context,
     data: &[u8],
@@ -39,18 +38,23 @@ fn srgbtexture2d(
     }
 }
 
-#[allow(unsafe_code)]
 unsafe fn as_u8_slice<T>(s: &[T]) -> &[u8] {
     std::slice::from_raw_parts(s.as_ptr() as *const u8, s.len() * std::mem::size_of::<T>())
 }
 
 pub struct Painter {
     program: glow::NativeProgram,
+    u_screen_size: glow::UniformLocation,
+    u_sampler: glow::UniformLocation,
     egui_texture: Option<glow::NativeTexture>,
     egui_texture_version: Option<u64>,
 
     /// `None` means unallocated (freed) slot.
     user_textures: Vec<Option<UserTexture>>,
+
+    va: glow::NativeVertexArray,
+    vb: glow::NativeBuffer,
+    eb: glow::NativeBuffer,
 }
 
 #[derive(Default)]
@@ -73,7 +77,6 @@ pub enum ShaderVersion {
 }
 
 impl Painter {
-    #[allow(unsafe_code)]
     pub fn new(gl: &glow::Context, ver: ShaderVersion) -> Painter {
         use ShaderVersion::*;
         let (v_src, f_src) = match ver {
@@ -96,7 +99,7 @@ impl Painter {
         };
 
         // TODO error handling
-        let program = unsafe {
+        unsafe {
             let v = gl.create_shader(glow::VERTEX_SHADER).unwrap();
             let f = gl.create_shader(glow::FRAGMENT_SHADER).unwrap();
             gl.shader_source(v, v_src);
@@ -109,88 +112,16 @@ impl Painter {
             gl.link_program(program);
             gl.delete_shader(v);
             gl.delete_shader(f);
-            program
-        };
 
-        Painter {
-            program,
-            egui_texture: None,
-            egui_texture_version: None,
-            user_textures: Default::default(),
-        }
-    }
+            let u_screen_size = gl.get_uniform_location(program, "u_screen_size").unwrap();
+            let u_sampler = gl.get_uniform_location(program, "u_sampler").unwrap();
 
-    pub fn upload_egui_texture(&mut self, gl: &glow::Context, texture: &egui::Texture) {
-        if self.egui_texture_version == Some(texture.version) {
-            return; // No change
-        }
-
-        // TODO Terrible hack
-        let pixels: Vec<u8> = texture
-            .pixels
-            .iter()
-            .map(|a| Vec::from(Color32::from_white_alpha(*a).to_array()))
-            .flatten()
-            .collect();
-
-        self.egui_texture =
-            Some(srgbtexture2d(gl, &pixels, texture.width, texture.height).unwrap());
-        self.egui_texture_version = Some(texture.version);
-    }
-
-    /// Main entry-point for painting a frame.
-    /// You should call `target.clear_color(..)` before
-    /// and `target.finish()` after this.
-    pub fn paint_meshes(
-        &mut self,
-        display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
-        gl: &glow::Context,
-        pixels_per_point: f32,
-        cipped_meshes: Vec<egui::ClippedMesh>,
-        egui_texture: &egui::Texture,
-    ) {
-        self.upload_egui_texture(gl, egui_texture);
-        self.upload_pending_user_textures(gl);
-
-        for egui::ClippedMesh(clip_rect, mesh) in cipped_meshes {
-            self.paint_mesh(display, gl, pixels_per_point, clip_rect, &mesh)
-        }
-    }
-
-    #[allow(unsafe_code)]
-    #[inline(never)] // Easier profiling
-    pub fn paint_mesh(
-        &mut self,
-        display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
-        gl: &glow::Context,
-        pixels_per_point: f32,
-        clip_rect: Rect,
-        mesh: &Mesh,
-    ) {
-        debug_assert!(mesh.is_valid());
-
-        // TODO: we should probably reuse the `IndexBuffer` instead of allocating a new one each frame.
-        let (vb, va, eb) = unsafe {
-            assert_eq!(std::mem::size_of::<Vertex>(), 20);
             let va = gl.create_vertex_array().unwrap();
             let vb = gl.create_buffer().unwrap();
             let eb = gl.create_buffer().unwrap();
 
             gl.bind_vertex_array(Some(va));
-
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(vb));
-            gl.buffer_data_u8_slice(
-                glow::ARRAY_BUFFER,
-                as_u8_slice(mesh.vertices.as_slice()),
-                glow::STREAM_DRAW,
-            );
-
-            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(eb));
-            gl.buffer_data_u8_slice(
-                glow::ELEMENT_ARRAY_BUFFER,
-                as_u8_slice(mesh.indices.as_slice()),
-                glow::STREAM_DRAW,
-            );
 
             gl.vertex_attrib_pointer_f32(
                 0,
@@ -221,8 +152,92 @@ impl Painter {
                 4 * std::mem::size_of::<f32>() as i32,
             );
             gl.enable_vertex_attrib_array(1);
-            (vb, va, eb)
-        };
+
+            Painter {
+                program,
+                u_screen_size,
+                u_sampler,
+                egui_texture: None,
+                egui_texture_version: None,
+                user_textures: Default::default(),
+                va,
+                vb,
+                eb,
+            }
+        }
+    }
+
+    pub fn upload_egui_texture(&mut self, gl: &glow::Context, texture: &egui::Texture) {
+        if self.egui_texture_version == Some(texture.version) {
+            return; // No change
+        }
+
+        let pixels: Vec<u8> = texture
+            .pixels
+            .iter()
+            .map(|a| Vec::from(Color32::from_white_alpha(*a).to_array()))
+            .flatten()
+            .collect();
+
+        if let Some(old_tex) = std::mem::replace(
+            &mut self.egui_texture,
+            Some(srgbtexture2d(gl, &pixels, texture.width, texture.height).unwrap()),
+        ) {
+            unsafe {
+                gl.delete_texture(old_tex);
+            }
+        }
+        self.egui_texture_version = Some(texture.version);
+    }
+
+    /// Main entry-point for painting a frame.
+    /// You should call `target.clear_color(..)` before
+    /// and `target.finish()` after this.
+    pub fn paint_meshes(
+        &mut self,
+        display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
+        gl: &glow::Context,
+        pixels_per_point: f32,
+        cipped_meshes: Vec<egui::ClippedMesh>,
+        egui_texture: &egui::Texture,
+    ) {
+        self.upload_egui_texture(gl, egui_texture);
+        self.upload_pending_user_textures(gl);
+
+        for egui::ClippedMesh(clip_rect, mesh) in cipped_meshes {
+            self.paint_mesh(display, gl, pixels_per_point, clip_rect, &mesh)
+        }
+    }
+
+    #[inline(never)] // Easier profiling
+    pub fn paint_mesh(
+        &mut self,
+        display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
+        gl: &glow::Context,
+        pixels_per_point: f32,
+        clip_rect: Rect,
+        mesh: &Mesh,
+    ) {
+        debug_assert!(mesh.is_valid());
+
+        unsafe {
+            assert_eq!(std::mem::size_of::<Vertex>(), 20);
+            gl.bind_vertex_array(Some(self.va));
+
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vb));
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                as_u8_slice(mesh.vertices.as_slice()),
+                glow::STREAM_DRAW,
+            );
+
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.eb));
+            gl.buffer_data_u8_slice(
+                glow::ELEMENT_ARRAY_BUFFER,
+                as_u8_slice(mesh.indices.as_slice()),
+                glow::STREAM_DRAW,
+            );
+        }
 
         let glutin::dpi::PhysicalSize {
             width: width_in_pixels,
@@ -236,12 +251,10 @@ impl Painter {
                 gl.use_program(Some(self.program));
                 // The texture coordinates for text are so that both nearest and linear should work with the egui font texture.
                 // For user textures linear sampling is more likely to be the right choice.
-                let u_screen_size = gl.get_uniform_location(self.program, "u_screen_size");
-                gl.uniform_2_f32(u_screen_size.as_ref(), width_in_points, height_in_points);
-                let u_sampler = gl.get_uniform_location(self.program, "u_sampler");
-                gl.uniform_1_i32(u_sampler.as_ref(), 0);
+                gl.uniform_2_f32(Some(&self.u_screen_size), width_in_points, height_in_points);
+                gl.uniform_1_i32(Some(&self.u_sampler), 0);
                 gl.active_texture(glow::TEXTURE0);
-                gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
+                gl.bind_texture(glow::TEXTURE_2D, Some(texture));
                 gl.tex_parameter_i32(
                     glow::TEXTURE_2D,
                     glow::TEXTURE_MAG_FILTER,
@@ -306,9 +319,6 @@ impl Painter {
                     glow::UNSIGNED_INT,
                     0,
                 );
-                gl.delete_vertex_array(va);
-                gl.delete_buffer(vb);
-                gl.delete_buffer(eb);
             }
         }
     }
@@ -359,7 +369,6 @@ impl Painter {
 
         if let egui::TextureId::User(id) = id {
             if let Some(Some(user_texture)) = self.user_textures.get_mut(id as usize) {
-                // TODO Terrible hack
                 let pixels: Vec<u8> = pixels
                     .iter()
                     .map(|srgba| Vec::from(srgba.to_array()))
@@ -384,15 +393,10 @@ impl Painter {
         }
     }
 
-    pub fn get_texture(&self, texture_id: egui::TextureId) -> Option<&glow::NativeTexture> {
+    pub fn get_texture(&self, texture_id: egui::TextureId) -> Option<glow::NativeTexture> {
         match texture_id {
-            egui::TextureId::Egui => self.egui_texture.as_ref(),
-            egui::TextureId::User(id) => self
-                .user_textures
-                .get(id as usize)?
-                .as_ref()?
-                .gl_texture
-                .as_ref(),
+            egui::TextureId::Egui => self.egui_texture,
+            egui::TextureId::User(id) => self.user_textures.get(id as usize)?.as_ref()?.gl_texture,
         }
     }
 

@@ -1,24 +1,52 @@
 #![allow(deprecated)] // legacy implement_vertex macro
 
-use {
-    egui::{
-        emath::Rect,
-        epaint::{Color32, Mesh},
-    },
-    glium::{
-        implement_vertex,
-        index::PrimitiveType,
-        program,
-        texture::{self, srgb_texture2d::SrgbTexture2d},
-        uniform,
-        uniforms::{MagnifySamplerFilter, SamplerWrapFunction},
-        Frame, Surface,
-    },
+use egui::{
+    emath::Rect,
+    epaint::{Color32, Mesh, Vertex},
 };
 
+use glow::HasContext;
+
+// TODO proper error checking, memory leaks, etc
+#[allow(unsafe_code)]
+fn srgbtexture2d(
+    gl: &glow::Context,
+    data: &[u8],
+    w: usize,
+    h: usize,
+) -> Option<glow::NativeTexture> {
+    assert_eq!(data.len(), w * h * 4);
+    assert!(w >= 1);
+    assert!(h >= 1);
+    unsafe {
+        let tex = gl.create_texture().ok()?;
+        gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+        gl.tex_storage_2d(glow::TEXTURE_2D, 1, glow::SRGB8_ALPHA8, w as i32, h as i32);
+        gl.tex_sub_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            0,
+            0,
+            w as i32,
+            h as i32,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            glow::PixelUnpackData::Slice(data),
+        );
+        gl.bind_texture(glow::TEXTURE_2D, None);
+        assert_eq!(gl.get_error(), glow::NO_ERROR);
+        Some(tex)
+    }
+}
+
+#[allow(unsafe_code)]
+unsafe fn as_u8_slice<T>(s: &[T]) -> &[u8] {
+    std::slice::from_raw_parts(s.as_ptr() as *const u8, s.len() * std::mem::size_of::<T>())
+}
+
 pub struct Painter {
-    program: glium::Program,
-    egui_texture: Option<SrgbTexture2d>,
+    program: glow::NativeProgram,
+    egui_texture: Option<glow::NativeTexture>,
     egui_texture_version: Option<u64>,
 
     /// `None` means unallocated (freed) slot.
@@ -28,35 +56,61 @@ pub struct Painter {
 #[derive(Default)]
 struct UserTexture {
     /// Pending upload (will be emptied later).
-    /// This is the format glium likes.
-    pixels: Vec<Vec<(u8, u8, u8, u8)>>,
+    /// This is the format glow likes.
+    pixels: Vec<u8>,
+    pixels_res: (usize, usize),
 
     /// Lazily uploaded
-    gl_texture: Option<SrgbTexture2d>,
+    gl_texture: Option<glow::NativeTexture>,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum ShaderVersion {
+    Gl120,
+    Gl140,
+    Es100,
+    Es300,
 }
 
 impl Painter {
-    pub fn new(facade: &dyn glium::backend::Facade) -> Painter {
-        let program = program! {
-            facade,
-            120 => {
-                vertex: include_str!("shader/vertex_120.glsl"),
-                fragment: include_str!("shader/fragment_120.glsl"),
-            },
-            140 => {
-                vertex: include_str!("shader/vertex_140.glsl"),
-                fragment: include_str!("shader/fragment_140.glsl"),
-            },
-            100 es => {
-                vertex: include_str!("shader/vertex_100es.glsl"),
-                fragment: include_str!("shader/fragment_100es.glsl"),
-            },
-            300 es => {
-                vertex: include_str!("shader/vertex_300es.glsl"),
-                fragment: include_str!("shader/fragment_300es.glsl"),
-            },
-        }
-        .expect("Failed to compile shader");
+    #[allow(unsafe_code)]
+    pub fn new(gl: &glow::Context, ver: ShaderVersion) -> Painter {
+        use ShaderVersion::*;
+        let (v_src, f_src) = match ver {
+            Gl120 => (
+                include_str!("shader/vertex_120.glsl"),
+                include_str!("shader/fragment_120.glsl"),
+            ),
+            Gl140 => (
+                include_str!("shader/vertex_140.glsl"),
+                include_str!("shader/fragment_140.glsl"),
+            ),
+            Es100 => (
+                include_str!("shader/vertex_100es.glsl"),
+                include_str!("shader/fragment_100es.glsl"),
+            ),
+            Es300 => (
+                include_str!("shader/vertex_300es.glsl"),
+                include_str!("shader/fragment_300es.glsl"),
+            ),
+        };
+
+        // TODO error handling
+        let program = unsafe {
+            let v = gl.create_shader(glow::VERTEX_SHADER).unwrap();
+            let f = gl.create_shader(glow::FRAGMENT_SHADER).unwrap();
+            gl.shader_source(v, v_src);
+            gl.shader_source(f, f_src);
+            gl.compile_shader(v);
+            gl.compile_shader(f);
+            let program = gl.create_program().unwrap();
+            gl.attach_shader(program, v);
+            gl.attach_shader(program, f);
+            gl.link_program(program);
+            gl.delete_shader(v);
+            gl.delete_shader(f);
+            program
+        };
 
         Painter {
             program,
@@ -66,29 +120,21 @@ impl Painter {
         }
     }
 
-    pub fn upload_egui_texture(
-        &mut self,
-        facade: &dyn glium::backend::Facade,
-        texture: &egui::Texture,
-    ) {
+    pub fn upload_egui_texture(&mut self, gl: &glow::Context, texture: &egui::Texture) {
         if self.egui_texture_version == Some(texture.version) {
             return; // No change
         }
 
-        let pixels: Vec<Vec<(u8, u8, u8, u8)>> = texture
+        // TODO Terrible hack
+        let pixels: Vec<u8> = texture
             .pixels
-            .chunks(texture.width as usize)
-            .map(|row| {
-                row.iter()
-                    .map(|&a| Color32::from_white_alpha(a).to_tuple())
-                    .collect()
-            })
+            .iter()
+            .map(|a| Vec::from(Color32::from_white_alpha(*a).to_array()))
+            .flatten()
             .collect();
 
-        let format = texture::SrgbFormat::U8U8U8U8;
-        let mipmaps = texture::MipmapsOption::NoMipmap;
         self.egui_texture =
-            Some(SrgbTexture2d::with_format(facade, pixels, format, mipmaps).unwrap());
+            Some(srgbtexture2d(gl, &pixels, texture.width, texture.height).unwrap());
         self.egui_texture_version = Some(texture.version);
     }
 
@@ -97,93 +143,136 @@ impl Painter {
     /// and `target.finish()` after this.
     pub fn paint_meshes(
         &mut self,
-        display: &glium::Display,
-        target: &mut Frame,
+        display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
+        gl: &glow::Context,
         pixels_per_point: f32,
         cipped_meshes: Vec<egui::ClippedMesh>,
         egui_texture: &egui::Texture,
     ) {
-        self.upload_egui_texture(display, egui_texture);
-        self.upload_pending_user_textures(display);
+        self.upload_egui_texture(gl, egui_texture);
+        self.upload_pending_user_textures(gl);
 
         for egui::ClippedMesh(clip_rect, mesh) in cipped_meshes {
-            self.paint_mesh(target, display, pixels_per_point, clip_rect, &mesh)
+            self.paint_mesh(display, gl, pixels_per_point, clip_rect, &mesh)
         }
     }
 
+    #[allow(unsafe_code)]
     #[inline(never)] // Easier profiling
     pub fn paint_mesh(
         &mut self,
-        target: &mut Frame,
-        display: &glium::Display,
+        display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
+        gl: &glow::Context,
         pixels_per_point: f32,
         clip_rect: Rect,
         mesh: &Mesh,
     ) {
         debug_assert!(mesh.is_valid());
 
-        let vertex_buffer = {
-            #[derive(Copy, Clone)]
-            struct Vertex {
-                a_pos: [f32; 2],
-                a_tc: [f32; 2],
-                a_srgba: [u8; 4],
-            }
-            implement_vertex!(Vertex, a_pos, a_tc, a_srgba);
+        // TODO: we should probably reuse the `IndexBuffer` instead of allocating a new one each frame.
+        let (vb, va, eb) = unsafe {
+            assert_eq!(std::mem::size_of::<Vertex>(), 20);
+            let va = gl.create_vertex_array().unwrap();
+            let vb = gl.create_buffer().unwrap();
+            let eb = gl.create_buffer().unwrap();
 
-            let vertices: Vec<Vertex> = mesh
-                .vertices
-                .iter()
-                .map(|v| Vertex {
-                    a_pos: [v.pos.x, v.pos.y],
-                    a_tc: [v.uv.x, v.uv.y],
-                    a_srgba: v.color.to_array(),
-                })
-                .collect();
+            gl.bind_vertex_array(Some(va));
 
-            // TODO: we should probably reuse the `VertexBuffer` instead of allocating a new one each frame.
-            glium::VertexBuffer::new(display, &vertices).unwrap()
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(vb));
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                as_u8_slice(mesh.vertices.as_slice()),
+                glow::STREAM_DRAW,
+            );
+
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(eb));
+            gl.buffer_data_u8_slice(
+                glow::ELEMENT_ARRAY_BUFFER,
+                as_u8_slice(mesh.indices.as_slice()),
+                glow::STREAM_DRAW,
+            );
+
+            gl.vertex_attrib_pointer_f32(
+                0,
+                2,
+                glow::FLOAT,
+                false,
+                std::mem::size_of::<Vertex>() as i32,
+                0,
+            );
+            gl.enable_vertex_attrib_array(0);
+
+            gl.vertex_attrib_pointer_f32(
+                2,
+                2,
+                glow::FLOAT,
+                false,
+                std::mem::size_of::<Vertex>() as i32,
+                2 * std::mem::size_of::<f32>() as i32,
+            );
+            gl.enable_vertex_attrib_array(2);
+
+            gl.vertex_attrib_pointer_f32(
+                1,
+                4,
+                glow::UNSIGNED_BYTE,
+                false,
+                std::mem::size_of::<Vertex>() as i32,
+                4 * std::mem::size_of::<f32>() as i32,
+            );
+            gl.enable_vertex_attrib_array(1);
+            (vb, va, eb)
         };
 
-        // TODO: we should probably reuse the `IndexBuffer` instead of allocating a new one each frame.
-        let index_buffer =
-            glium::IndexBuffer::new(display, PrimitiveType::TrianglesList, &mesh.indices).unwrap();
-
-        let (width_in_pixels, height_in_pixels) = display.get_framebuffer_dimensions();
+        let glutin::dpi::PhysicalSize {
+            width: width_in_pixels,
+            height: height_in_pixels,
+        } = display.window().inner_size();
         let width_in_points = width_in_pixels as f32 / pixels_per_point;
         let height_in_points = height_in_pixels as f32 / pixels_per_point;
 
         if let Some(texture) = self.get_texture(mesh.texture_id) {
-            // The texture coordinates for text are so that both nearest and linear should work with the egui font texture.
-            // For user textures linear sampling is more likely to be the right choice.
-            let filter = MagnifySamplerFilter::Linear;
+            unsafe {
+                gl.use_program(Some(self.program));
+                // The texture coordinates for text are so that both nearest and linear should work with the egui font texture.
+                // For user textures linear sampling is more likely to be the right choice.
+                let u_screen_size = gl.get_uniform_location(self.program, "u_screen_size");
+                gl.uniform_2_f32(u_screen_size.as_ref(), width_in_points, height_in_points);
+                let u_sampler = gl.get_uniform_location(self.program, "u_sampler");
+                gl.uniform_1_i32(u_sampler.as_ref(), 0);
+                gl.active_texture(glow::TEXTURE0);
+                gl.bind_texture(glow::TEXTURE_2D, Some(*texture));
+                gl.tex_parameter_i32(
+                    glow::TEXTURE_2D,
+                    glow::TEXTURE_MAG_FILTER,
+                    glow::LINEAR as i32,
+                );
+                gl.tex_parameter_i32(
+                    glow::TEXTURE_2D,
+                    glow::TEXTURE_WRAP_S,
+                    glow::CLAMP_TO_EDGE as i32,
+                );
+                gl.tex_parameter_i32(
+                    glow::TEXTURE_2D,
+                    glow::TEXTURE_WRAP_T,
+                    glow::CLAMP_TO_EDGE as i32,
+                );
 
-            let uniforms = uniform! {
-                u_screen_size: [width_in_points, height_in_points],
-                u_sampler: texture.sampled().magnify_filter(filter).wrap_function(SamplerWrapFunction::Clamp),
-            };
+                gl.enable(glow::BLEND);
+                gl.blend_equation(glow::FUNC_ADD);
+                gl.blend_func_separate(
+                    // egui outputs colors with premultiplied alpha:
+                    glow::ONE,
+                    glow::ONE_MINUS_SRC_ALPHA,
+                    // Less important, but this is technically the correct alpha blend function
+                    // when you want to make use of the framebuffer alpha (for screenshots, compositing, etc).
+                    glow::ONE_MINUS_DST_ALPHA,
+                    glow::ONE,
+                );
 
-            // egui outputs colors with premultiplied alpha:
-            let color_blend_func = glium::BlendingFunction::Addition {
-                source: glium::LinearBlendingFactor::One,
-                destination: glium::LinearBlendingFactor::OneMinusSourceAlpha,
-            };
-
-            // Less important, but this is technically the correct alpha blend function
-            // when you want to make use of the framebuffer alpha (for screenshots, compositing, etc).
-            let alpha_blend_func = glium::BlendingFunction::Addition {
-                source: glium::LinearBlendingFactor::OneMinusDestinationAlpha,
-                destination: glium::LinearBlendingFactor::One,
-            };
-
-            let blend = glium::Blend {
-                color: color_blend_func,
-                alpha: alpha_blend_func,
-                ..Default::default()
-            };
-
-            // egui outputs mesh in both winding orders:
-            let backface_culling = glium::BackfaceCullingMode::CullingDisabled;
+                // egui outputs mesh in both winding orders:
+                gl.disable(glow::CULL_FACE);
+            }
 
             // Transform clip rect to physical pixels:
             let clip_min_x = pixels_per_point * clip_rect.min.x;
@@ -197,32 +286,30 @@ impl Painter {
             let clip_max_x = clip_max_x.clamp(clip_min_x, width_in_pixels as f32);
             let clip_max_y = clip_max_y.clamp(clip_min_y, height_in_pixels as f32);
 
-            let clip_min_x = clip_min_x.round() as u32;
-            let clip_min_y = clip_min_y.round() as u32;
-            let clip_max_x = clip_max_x.round() as u32;
-            let clip_max_y = clip_max_y.round() as u32;
+            let clip_min_x = clip_min_x.round() as i32;
+            let clip_min_y = clip_min_y.round() as i32;
+            let clip_max_x = clip_max_x.round() as i32;
+            let clip_max_y = clip_max_y.round() as i32;
 
-            let params = glium::DrawParameters {
-                blend,
-                backface_culling,
-                scissor: Some(glium::Rect {
-                    left: clip_min_x,
-                    bottom: height_in_pixels - clip_max_y,
-                    width: clip_max_x - clip_min_x,
-                    height: clip_max_y - clip_min_y,
-                }),
-                ..Default::default()
-            };
-
-            target
-                .draw(
-                    &vertex_buffer,
-                    &index_buffer,
-                    &self.program,
-                    &uniforms,
-                    &params,
-                )
-                .unwrap();
+            unsafe {
+                gl.viewport(0, 0, width_in_pixels as i32, height_in_pixels as i32);
+                gl.scissor(
+                    clip_min_x,
+                    height_in_pixels as i32 - clip_max_y,
+                    clip_max_x - clip_min_x,
+                    clip_max_y - clip_min_y,
+                );
+                gl.enable(glow::SCISSOR_TEST);
+                gl.draw_elements(
+                    glow::TRIANGLES,
+                    mesh.indices.len() as i32,
+                    glow::UNSIGNED_INT,
+                    0,
+                );
+                gl.delete_vertex_array(va);
+                gl.delete_buffer(vb);
+                gl.delete_buffer(eb);
+            }
         }
     }
 
@@ -242,17 +329,15 @@ impl Painter {
         id
     }
 
-    /// register glium texture as egui texture
+    /// register glow texture as egui texture
     /// Usable for render to image rectangle
-    pub fn register_glium_texture(
-        &mut self,
-        texture: glium::texture::SrgbTexture2d,
-    ) -> egui::TextureId {
+    pub fn register_glow_texture(&mut self, texture: glow::NativeTexture) -> egui::TextureId {
         let id = self.alloc_user_texture();
         if let egui::TextureId::User(id) = id {
             if let Some(Some(user_texture)) = self.user_textures.get_mut(id as usize) {
                 *user_texture = UserTexture {
                     pixels: vec![],
+                    pixels_res: (0, 0),
                     gl_texture: Some(texture),
                 }
             }
@@ -274,13 +359,16 @@ impl Painter {
 
         if let egui::TextureId::User(id) = id {
             if let Some(Some(user_texture)) = self.user_textures.get_mut(id as usize) {
-                let pixels: Vec<Vec<(u8, u8, u8, u8)>> = pixels
-                    .chunks(size.0 as usize)
-                    .map(|row| row.iter().map(|srgba| srgba.to_tuple()).collect())
+                // TODO Terrible hack
+                let pixels: Vec<u8> = pixels
+                    .iter()
+                    .map(|srgba| Vec::from(srgba.to_array()))
+                    .flatten()
                     .collect();
 
                 *user_texture = UserTexture {
                     pixels,
+                    pixels_res: size,
                     gl_texture: None,
                 };
             }
@@ -296,7 +384,7 @@ impl Painter {
         }
     }
 
-    pub fn get_texture(&self, texture_id: egui::TextureId) -> Option<&SrgbTexture2d> {
+    pub fn get_texture(&self, texture_id: egui::TextureId) -> Option<&glow::NativeTexture> {
         match texture_id {
             egui::TextureId::Egui => self.egui_texture.as_ref(),
             egui::TextureId::User(id) => self
@@ -308,14 +396,20 @@ impl Painter {
         }
     }
 
-    pub fn upload_pending_user_textures(&mut self, facade: &dyn glium::backend::Facade) {
+    pub fn upload_pending_user_textures(&mut self, gl: &glow::Context) {
         for user_texture in self.user_textures.iter_mut().flatten() {
             if user_texture.gl_texture.is_none() {
                 let pixels = std::mem::take(&mut user_texture.pixels);
-                let format = texture::SrgbFormat::U8U8U8U8;
-                let mipmaps = texture::MipmapsOption::NoMipmap;
-                user_texture.gl_texture =
-                    Some(SrgbTexture2d::with_format(facade, pixels, format, mipmaps).unwrap());
+                user_texture.gl_texture = Some(
+                    srgbtexture2d(
+                        gl,
+                        &pixels,
+                        user_texture.pixels_res.0,
+                        user_texture.pixels_res.1,
+                    )
+                    .unwrap(),
+                );
+                user_texture.pixels_res = (0, 0);
             }
         }
     }

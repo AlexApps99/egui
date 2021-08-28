@@ -54,9 +54,9 @@ pub fn fetch_blocking(request: &Request) -> Result<Response, String> {
 
 // ----------------------------------------------------------------------------
 
-pub(crate) struct GliumHttp {}
+pub(crate) struct GlowHttp {}
 
-impl epi::backend::Http for GliumHttp {
+impl epi::backend::Http for GlowHttp {
     fn fetch_dyn(
         &self,
         request: Request,

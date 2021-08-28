@@ -1,6 +1,6 @@
-//! [`egui`] bindings for [`glium`](https://github.com/glium/glium).
+//! [`egui`] bindings for [`glow`](https://github.com/grovesNL/glow).
 //!
-//! The main type you want to use is [`EguiGlium`].
+//! The main type you want to use is [`EguiGlow`].
 //!
 //! This library is an [`epi`] backend.
 //! If you are writing an app, you may want to look at [`eframe`](https://docs.rs/eframe) instead.
@@ -14,7 +14,7 @@
 //     rustdoc::missing_crate_level_docs,
 //     rustdoc::private_intra_doc_links
 // )]
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 #![warn(clippy::all, rust_2018_idioms)]
 #![allow(clippy::manual_range_contains, clippy::single_match)]
 
@@ -35,7 +35,7 @@ pub use epi::NativeOptions;
 use {
     copypasta::ClipboardProvider,
     egui::*,
-    glium::glutin::{
+    glutin::{
         self,
         event::{Force, VirtualKeyCode},
     },
@@ -44,12 +44,12 @@ use {
 
 pub use copypasta::ClipboardContext; // TODO: remove
 
-pub struct GliumInputState {
+pub struct GlowInputState {
     pub pointer_pos_in_points: Option<Pos2>,
     pub raw: egui::RawInput,
 }
 
-impl GliumInputState {
+impl GlowInputState {
     pub fn from_pixels_per_point(pixels_per_point: f32) -> Self {
         Self {
             pointer_pos_in_points: Default::default(),
@@ -63,8 +63,8 @@ impl GliumInputState {
 
 /// Helper: checks for Alt-F4 (windows/linux) or Cmd-Q (Mac)
 pub fn is_quit_shortcut(
-    input_state: &GliumInputState,
-    input: &glium::glutin::event::KeyboardInput,
+    input_state: &GlowInputState,
+    input: &glutin::event::KeyboardInput,
 ) -> bool {
     if cfg!(target_os = "macos") {
         input.state == glutin::event::ElementState::Pressed
@@ -78,10 +78,7 @@ pub fn is_quit_shortcut(
 }
 
 /// Is this a close event or a Cmd-Q/Alt-F4 keyboard command?
-pub fn is_quit_event(
-    input_state: &GliumInputState,
-    event: &glutin::event::WindowEvent<'_>,
-) -> bool {
+pub fn is_quit_event(input_state: &GlowInputState, event: &glutin::event::WindowEvent<'_>) -> bool {
     use glutin::event::WindowEvent;
     match event {
         WindowEvent::CloseRequested | WindowEvent::Destroyed => true,
@@ -94,7 +91,7 @@ pub fn input_to_egui(
     pixels_per_point: f32,
     event: &glutin::event::WindowEvent<'_>,
     clipboard: Option<&mut ClipboardContext>,
-    input_state: &mut GliumInputState,
+    input_state: &mut GlowInputState,
 ) {
     use glutin::event::WindowEvent;
     match event {
@@ -277,7 +274,7 @@ pub fn input_to_egui(
     }
 }
 
-/// Glium sends special keys (backspace, delete, F1, ...) as characters.
+/// Glutin sends special keys (backspace, delete, F1, ...) as characters.
 /// Ignore those.
 /// We also ignore '\r', '\n', '\t'.
 /// Newlines are handled by the `Key::Enter` event.
@@ -410,19 +407,19 @@ fn translate_cursor(cursor_icon: egui::CursorIcon) -> Option<glutin::window::Cur
     }
 }
 
-fn set_cursor_icon(display: &glium::backend::glutin::Display, cursor_icon: egui::CursorIcon) {
+fn set_cursor_icon(window: &glutin::window::Window, cursor_icon: egui::CursorIcon) {
     if let Some(cursor_icon) = translate_cursor(cursor_icon) {
-        display.gl_window().window().set_cursor_visible(true);
-        display.gl_window().window().set_cursor_icon(cursor_icon);
+        window.set_cursor_visible(true);
+        window.set_cursor_icon(cursor_icon);
     } else {
-        display.gl_window().window().set_cursor_visible(false);
+        window.set_cursor_visible(false);
     }
 }
 
 pub fn handle_output(
     output: egui::Output,
     clipboard: Option<&mut ClipboardContext>,
-    display: &glium::Display,
+    window: &glutin::window::Window,
 ) {
     if let Some(open) = output.open_url {
         if let Err(err) = webbrowser::open(&open.url) {
@@ -439,10 +436,7 @@ pub fn handle_output(
     }
 
     if let Some(egui::Pos2 { x, y }) = output.text_cursor_pos {
-        display
-            .gl_window()
-            .window()
-            .set_ime_position(glium::glutin::dpi::LogicalPosition { x, y })
+        window.set_ime_position(glutin::dpi::LogicalPosition { x, y })
     }
 }
 
@@ -472,38 +466,42 @@ pub fn seconds_since_midnight() -> Option<f64> {
     None
 }
 
-pub fn screen_size_in_pixels(display: &glium::Display) -> Vec2 {
-    let (width_in_pixels, height_in_pixels) = display.get_framebuffer_dimensions();
-    vec2(width_in_pixels as f32, height_in_pixels as f32)
+pub fn screen_size_in_pixels(window: &glutin::window::Window) -> Vec2 {
+    let glutin::dpi::PhysicalSize { width, height } = window.inner_size();
+    vec2(width as f32, height as f32)
 }
 
-pub fn native_pixels_per_point(display: &glium::Display) -> f32 {
-    display.gl_window().window().scale_factor() as f32
+pub fn native_pixels_per_point(window: &glutin::window::Window) -> f32 {
+    window.scale_factor() as f32
 }
 
 // ----------------------------------------------------------------------------
 
-/// Use [`egui`] from a [`glium`] app.
-pub struct EguiGlium {
+/// Use [`egui`] from a [`glow`] app.
+pub struct EguiGlow {
     egui_ctx: egui::CtxRef,
     start_time: std::time::Instant,
     clipboard: Option<crate::ClipboardContext>,
-    input_state: crate::GliumInputState,
+    input_state: crate::GlowInputState,
     painter: crate::Painter,
     current_cursor_icon: egui::CursorIcon,
     screen_reader: crate::screen_reader::ScreenReader,
 }
 
-impl EguiGlium {
-    pub fn new(display: &glium::Display) -> Self {
+impl EguiGlow {
+    pub fn new(
+        display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
+        gl: &glow::Context,
+    ) -> Self {
         Self {
             egui_ctx: Default::default(),
             start_time: std::time::Instant::now(),
             clipboard: crate::init_clipboard(),
-            input_state: crate::GliumInputState::from_pixels_per_point(
-                crate::native_pixels_per_point(display),
+            input_state: crate::GlowInputState::from_pixels_per_point(
+                crate::native_pixels_per_point(display.window()),
             ),
-            painter: crate::Painter::new(display),
+            // TODO
+            painter: crate::Painter::new(gl, painter::ShaderVersion::Gl140),
             current_cursor_icon: egui::CursorIcon::Default,
             screen_reader: crate::screen_reader::ScreenReader::default(),
         }
@@ -517,7 +515,7 @@ impl EguiGlium {
         (&self.egui_ctx, &mut self.painter)
     }
 
-    pub fn on_event(&mut self, event: &glium::glutin::event::WindowEvent<'_>) {
+    pub fn on_event(&mut self, event: &glutin::event::WindowEvent<'_>) {
         crate::input_to_egui(
             self.egui_ctx.pixels_per_point(),
             event,
@@ -531,7 +529,7 @@ impl EguiGlium {
         crate::is_quit_event(&self.input_state, event)
     }
 
-    pub fn begin_frame(&mut self, display: &glium::Display) {
+    pub fn begin_frame(&mut self, window: &glutin::window::Window) {
         let pixels_per_point = self
             .input_state
             .raw
@@ -543,7 +541,7 @@ impl EguiGlium {
         // On Windows, a minimized window will have 0 width and height.
         // See: https://github.com/rust-windowing/winit/issues/208
         // This solves an issue where egui window positions would be changed when minimizing on Windows.
-        let screen_size = screen_size_in_pixels(display);
+        let screen_size = screen_size_in_pixels(window);
         self.input_state.raw.screen_rect = if screen_size.x > 0.0 && screen_size.y > 0.0 {
             Some(Rect::from_min_size(
                 Default::default(),
@@ -559,7 +557,7 @@ impl EguiGlium {
     /// Returns `needs_repaint` and shapes to draw.
     pub fn end_frame(
         &mut self,
-        display: &glium::Display,
+        window: &glutin::window::Window,
     ) -> (bool, Vec<egui::epaint::ClippedShape>) {
         let (egui_output, shapes) = self.egui_ctx.end_frame();
 
@@ -569,27 +567,27 @@ impl EguiGlium {
         if self.current_cursor_icon != egui_output.cursor_icon {
             // call only when changed to prevent flickering near frame boundary
             // when Windows OS tries to control cursor icon for window resizing
-            set_cursor_icon(display, egui_output.cursor_icon);
+            set_cursor_icon(window, egui_output.cursor_icon);
             self.current_cursor_icon = egui_output.cursor_icon;
         }
 
         let needs_repaint = egui_output.needs_repaint;
 
-        handle_output(egui_output, self.clipboard.as_mut(), display);
+        handle_output(egui_output, self.clipboard.as_mut(), window);
 
         (needs_repaint, shapes)
     }
 
     pub fn paint(
         &mut self,
-        display: &glium::Display,
-        target: &mut glium::Frame,
+        display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
+        gl: &glow::Context,
         shapes: Vec<egui::epaint::ClippedShape>,
     ) {
         let clipped_meshes = self.egui_ctx.tessellate(shapes);
         self.painter.paint_meshes(
             display,
-            target,
+            gl,
             self.egui_ctx.pixels_per_point(),
             clipped_meshes,
             &self.egui_ctx.texture(),

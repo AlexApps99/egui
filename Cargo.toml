@@ -13,7 +13,7 @@ members = [
 
 [patch.crates-io]
 egui = { path = 'egui' }
-egui_glium = { path = 'egui_glium' }
+#egui_glow = { path = 'egui_glow' }
 egui_web = { path = 'egui_web' }
 
 [profile.dev]

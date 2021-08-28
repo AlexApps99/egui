@@ -1,5 +1,3 @@
-use glium::glutin;
-
 #[cfg_attr(feature = "persistence", derive(serde::Deserialize, serde::Serialize))]
 pub struct WindowSettings {
     /// outer position of window in physical pixels
@@ -14,18 +12,12 @@ impl WindowSettings {
         crate::persistence::read_ron(settings_ron_path)
     }
 
-    pub fn from_display(display: &glium::Display) -> Self {
-        let scale_factor = display.gl_window().window().scale_factor();
-        let inner_size_points = display
-            .gl_window()
-            .window()
-            .inner_size()
-            .to_logical::<f32>(scale_factor);
+    pub fn from_window(window: &glutin::window::Window) -> Self {
+        let scale_factor = window.scale_factor();
+        let inner_size_points = window.inner_size().to_logical::<f32>(scale_factor);
 
         Self {
-            pos: display
-                .gl_window()
-                .window()
+            pos: window
                 .outer_position()
                 .ok()
                 .map(|p| egui::pos2(p.x as f32, p.y as f32)),
@@ -59,25 +51,20 @@ impl WindowSettings {
         // }
     }
 
-    pub fn restore_positions(&self, display: &glium::Display) {
+    pub fn restore_positions(&self, window: &glutin::window::Window) {
         // not needed, done by `initialize_size`
         // let size = self.size.unwrap_or_else(|| vec2(1024.0, 800.0));
-        // display
-        //     .gl_window()
-        //     .window()
+        // window
         //     .set_inner_size(glutin::dpi::PhysicalSize {
         //         width: size.x as f64,
         //         height: size.y as f64,
         //     });
 
         if let Some(pos) = self.pos {
-            display
-                .gl_window()
-                .window()
-                .set_outer_position(glutin::dpi::PhysicalPosition::new(
-                    pos.x as f64,
-                    pos.y as f64,
-                ));
+            window.set_outer_position(glutin::dpi::PhysicalPosition::new(
+                pos.x as f64,
+                pos.y as f64,
+            ));
         }
     }
 }

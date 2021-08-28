@@ -1,7 +1,7 @@
 /// Demonstrates how to make an app using egui.
 ///
 /// Implements `epi::App` so it can be used with
-/// [`egui_glium`](https://crates.io/crates/egui_glium) and [`egui_web`](https://crates.io/crates/egui_web).
+/// [`egui_glow`](https://crates.io/crates/egui_glow) and [`egui_web`](https://crates.io/crates/egui_web).
 #[derive(Default)]
 #[cfg_attr(feature = "persistence", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "persistence", serde(default))]

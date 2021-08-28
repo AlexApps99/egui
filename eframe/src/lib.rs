@@ -9,7 +9,7 @@
 //! You write your application code for [`epi`] (implementing [`epi::App`]) and then
 //! call from [`crate::run_native`] your `main.rs`, and/or call `eframe::start_web` from your `lib.rs`.
 //!
-//! `eframe` is implemented using [`egui_web`](https://docs.rs/egui_web) and [`egui_glium`](https://docs.rs/egui_glium).
+//! `eframe` is implemented using [`egui_web`](https://docs.rs/egui_web) and [`egui_glow`](https://docs.rs/egui_glow).
 
 // Forbid warnings in release builds:
 #![cfg_attr(not(debug_assertions), deny(warnings))]
@@ -69,5 +69,5 @@ pub fn start_web(canvas_id: &str, app: Box<dyn epi::App>) -> Result<(), wasm_bin
 /// Call from `fn main` like this: `eframe::run_native(Box::new(MyEguiApp::default()))`
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run_native(app: Box<dyn epi::App>, native_options: epi::NativeOptions) {
-    egui_glium::run(app, native_options)
+    egui_glow::run(app, native_options)
 }

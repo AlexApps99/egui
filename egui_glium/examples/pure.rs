@@ -27,11 +27,6 @@ fn create_display(
 
     let gl = unsafe { glow::Context::from_loader_function(|s| gl_window.get_proc_address(s)) };
 
-    unsafe {
-        use glow::HasContext;
-        gl.enable(glow::FRAMEBUFFER_SRGB);
-    }
-
     (gl_window, gl)
 }
 
@@ -88,7 +83,7 @@ fn main() {
                     );
                     gl.clear(glow::COLOR_BUFFER_BIT);
                 }
-                egui.paint(&display, &gl, shapes);
+                egui.paint(&display, shapes);
                 display.swap_buffers().unwrap();
             }
         };

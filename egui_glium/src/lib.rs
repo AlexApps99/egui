@@ -484,32 +484,32 @@ pub fn native_pixels_per_point(window: &glutin::window::Window) -> f32 {
 // ----------------------------------------------------------------------------
 
 /// Use [`egui`] from a [`glow`] app.
-pub struct EguiGlow {
+pub struct EguiGlow<'a> {
     egui_ctx: egui::CtxRef,
     start_time: std::time::Instant,
     #[cfg(feature = "copypasta")]
     clipboard: Option<crate::ClipboardContext>,
     input_state: crate::GlowInputState,
-    painter: crate::Painter,
+    painter: crate::Painter<'a>,
     current_cursor_icon: egui::CursorIcon,
     screen_reader: crate::screen_reader::ScreenReader,
 }
 
-impl EguiGlow {
+impl<'a> EguiGlow<'a> {
+    // TODO argument order
     pub fn new(
-        display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
-        gl: &glow::Context,
-    ) -> Self {
+        gl_window: &glutin::WindowedContext<glutin::PossiblyCurrent>,
+        gl: &'a glow::Context,
+    ) -> EguiGlow<'a> {
         Self {
             egui_ctx: Default::default(),
             start_time: std::time::Instant::now(),
             #[cfg(feature = "copypasta")]
             clipboard: crate::init_clipboard(),
             input_state: crate::GlowInputState::from_pixels_per_point(
-                crate::native_pixels_per_point(display.window()),
+                crate::native_pixels_per_point(gl_window.window()),
             ),
-            // TODO
-            painter: crate::Painter::new(gl, painter::ShaderVersion::Gl140),
+            painter: crate::Painter::new(gl),
             current_cursor_icon: egui::CursorIcon::Default,
             screen_reader: crate::screen_reader::ScreenReader::default(),
         }
@@ -519,7 +519,7 @@ impl EguiGlow {
         &self.egui_ctx
     }
 
-    pub fn ctx_and_painter_mut(&mut self) -> (&egui::CtxRef, &mut crate::Painter) {
+    pub fn ctx_and_painter_mut(&'a mut self) -> (&egui::CtxRef, &'a mut crate::Painter<'a>) {
         (&self.egui_ctx, &mut self.painter)
     }
 
@@ -594,14 +594,12 @@ impl EguiGlow {
 
     pub fn paint(
         &mut self,
-        display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
-        gl: &glow::Context,
+        gl_window: &glutin::WindowedContext<glutin::PossiblyCurrent>,
         shapes: Vec<egui::epaint::ClippedShape>,
     ) {
         let clipped_meshes = self.egui_ctx.tessellate(shapes);
         self.painter.paint_meshes(
-            display,
-            gl,
+            gl_window,
             self.egui_ctx.pixels_per_point(),
             clipped_meshes,
             &self.egui_ctx.texture(),

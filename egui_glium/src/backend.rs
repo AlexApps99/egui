@@ -29,7 +29,7 @@ fn deserialize_memory(_: &Option<Box<dyn epi::Storage>>) -> Option<egui::Memory>
     None
 }
 
-impl epi::TextureAllocator for Painter {
+impl epi::TextureAllocator for Painter<'_> {
     fn alloc_srgba_premultiplied(
         &mut self,
         size: (usize, usize),
@@ -133,7 +133,6 @@ fn create_display(
 
     unsafe {
         use glow::HasContext;
-        gl.enable(glow::FRAMEBUFFER_SRGB);
     }
 
     (gl_window, gl)
@@ -359,7 +358,7 @@ pub fn run(mut app: Box<dyn epi::App>, native_options: epi::NativeOptions) {
                     );
                     gl.clear(glow::COLOR_BUFFER_BIT);
                 }
-                egui.paint(&gl_window, &gl, shapes);
+                egui.paint(&gl_window, shapes);
                 gl_window.swap_buffers().unwrap();
             }
 

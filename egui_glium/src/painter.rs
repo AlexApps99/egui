@@ -59,7 +59,8 @@ unsafe fn as_u8_slice<T>(s: &[T]) -> &[u8] {
     std::slice::from_raw_parts(s.as_ptr() as *const u8, s.len() * std::mem::size_of::<T>())
 }
 
-pub struct Painter {
+pub struct Painter<'a> {
+    gl: &'a glow::Context,
     program: glow::NativeProgram,
     u_screen_size: glow::UniformLocation,
     u_sampler: glow::UniformLocation,
@@ -86,17 +87,37 @@ struct UserTexture {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub enum ShaderVersion {
+enum ShaderVersion {
     Gl120,
     Gl140,
     Es100,
     Es300,
 }
 
-impl Painter {
-    pub fn new(gl: &glow::Context, ver: ShaderVersion) -> Painter {
+//impl ShaderVersion {
+//    fn get(&glow::Context) -> Self {
+//        unsafe {
+//            let glsl_ver = glow::get_parameter_string(glow::SHADING_LANGUAGE_VERSION);
+//            let maj = glsl_ver[0].parse::<u8>();
+//            let min = glsl_ver[2].parse::<u8>();
+//            if maj < 3 {
+//                if min < 4 {
+//                    ShaderVersion::Gl120
+//                } else {
+//                    ShaderVersion::Gl140
+//                }
+//            } else {
+//                ShaderVersion::Es300
+//            }
+//        }
+//    }
+//}
+
+impl<'a> Painter<'a> {
+    pub fn new(gl: &'a glow::Context) -> Painter<'a> {
         use ShaderVersion::*;
-        let (v_src, f_src) = match ver {
+        // TODO detect the version
+        let (v_src, f_src) = match Gl140 {
             Gl120 => (
                 include_str!("shader/vertex_120.glsl"),
                 include_str!("shader/fragment_120.glsl"),
@@ -171,6 +192,7 @@ impl Painter {
             gl.enable_vertex_attrib_array(1);
 
             Painter {
+                gl,
                 program,
                 u_screen_size,
                 u_sampler,
@@ -184,7 +206,7 @@ impl Painter {
         }
     }
 
-    pub fn upload_egui_texture(&mut self, gl: &glow::Context, texture: &egui::Texture) {
+    pub fn upload_egui_texture(&mut self, texture: &egui::Texture) {
         if self.egui_texture_version == Some(texture.version) {
             return; // No change
         }
@@ -198,10 +220,10 @@ impl Painter {
 
         if let Some(old_tex) = std::mem::replace(
             &mut self.egui_texture,
-            Some(srgbtexture2d(gl, &pixels, texture.width, texture.height).unwrap()),
+            Some(srgbtexture2d(self.gl, &pixels, texture.width, texture.height).unwrap()),
         ) {
             unsafe {
-                gl.delete_texture(old_tex);
+                self.gl.delete_texture(old_tex);
             }
         }
         self.egui_texture_version = Some(texture.version);
@@ -209,17 +231,17 @@ impl Painter {
 
     unsafe fn prepare_painting(
         &mut self,
-        display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
-        gl: &glow::Context,
+        gl_window: &glutin::WindowedContext<glutin::PossiblyCurrent>,
         pixels_per_point: f32,
     ) -> (u32, u32) {
-        gl.enable(glow::SCISSOR_TEST);
+        self.gl.enable(glow::FRAMEBUFFER_SRGB);
+        self.gl.enable(glow::SCISSOR_TEST);
         // egui outputs mesh in both winding orders:
-        gl.disable(glow::CULL_FACE);
+        self.gl.disable(glow::CULL_FACE);
 
-        gl.enable(glow::BLEND);
-        gl.blend_equation(glow::FUNC_ADD);
-        gl.blend_func_separate(
+        self.gl.enable(glow::BLEND);
+        self.gl.blend_equation(glow::FUNC_ADD);
+        self.gl.blend_func_separate(
             // egui outputs colors with premultiplied alpha:
             glow::ONE,
             glow::ONE_MINUS_SRC_ALPHA,
@@ -232,22 +254,24 @@ impl Painter {
         let glutin::dpi::PhysicalSize {
             width: width_in_pixels,
             height: height_in_pixels,
-        } = display.window().inner_size();
+        } = gl_window.window().inner_size();
         let width_in_points = width_in_pixels as f32 / pixels_per_point;
         let height_in_points = height_in_pixels as f32 / pixels_per_point;
 
-        gl.viewport(0, 0, width_in_pixels as i32, height_in_pixels as i32);
-        gl.use_program(Some(self.program));
+        //gl.viewport(0, 0, width_in_pixels as i32, height_in_pixels as i32);
+        self.gl.use_program(Some(self.program));
 
         // The texture coordinates for text are so that both nearest and linear should work with the egui font texture.
         // For user textures linear sampling is more likely to be the right choice.
-        gl.uniform_2_f32(Some(&self.u_screen_size), width_in_points, height_in_points);
-        gl.uniform_1_i32(Some(&self.u_sampler), 0);
-        gl.active_texture(glow::TEXTURE0);
+        self.gl
+            .uniform_2_f32(Some(&self.u_screen_size), width_in_points, height_in_points);
+        self.gl.uniform_1_i32(Some(&self.u_sampler), 0);
+        self.gl.active_texture(glow::TEXTURE0);
 
-        gl.bind_vertex_array(Some(self.va));
-        gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vb));
-        gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.eb));
+        self.gl.bind_vertex_array(Some(self.va));
+        self.gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vb));
+        self.gl
+            .bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.eb));
         (width_in_pixels, height_in_pixels)
     }
 
@@ -256,29 +280,38 @@ impl Painter {
     /// and `target.finish()` after this.
     pub fn paint_meshes(
         &mut self,
-        display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
-        gl: &glow::Context,
+        gl_window: &glutin::WindowedContext<glutin::PossiblyCurrent>,
         pixels_per_point: f32,
         cipped_meshes: Vec<egui::ClippedMesh>,
         egui_texture: &egui::Texture,
     ) {
-        self.upload_egui_texture(gl, egui_texture);
-        self.upload_pending_user_textures(gl);
+        self.upload_egui_texture(egui_texture);
+        self.upload_pending_user_textures();
 
-        let (w, h) = unsafe { self.prepare_painting(display, gl, pixels_per_point) };
+        let (w, h) = unsafe { self.prepare_painting(gl_window, pixels_per_point) };
         for egui::ClippedMesh(clip_rect, mesh) in cipped_meshes {
-            self.paint_mesh(display, gl, w, h, pixels_per_point, clip_rect, &mesh)
+            self.paint_mesh_no_setup(w, h, pixels_per_point, clip_rect, &mesh)
         }
     }
 
-    // TODO have a function to set up all the needed settings
-    // Have a private version of this without that
-    // Have a public version WITH it
-    #[inline(never)] // Easier profiling
+    // I don't think this needs to exist as pub, it's just not very useful when it can be included
+    // in paint_meshes
+    // No need for additional complexity - especially when egui_web does not have this pub
+    #[deprecated]
     pub fn paint_mesh(
         &mut self,
-        _display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
-        gl: &glow::Context,
+        gl_window: &glutin::WindowedContext<glutin::PossiblyCurrent>,
+        pixels_per_point: f32,
+        clip_rect: Rect,
+        mesh: &Mesh,
+    ) {
+        let (w, h) = unsafe { self.prepare_painting(gl_window, pixels_per_point) };
+        self.paint_mesh_no_setup(w, h, pixels_per_point, clip_rect, &mesh)
+    }
+
+    #[inline(never)] // Easier profiling
+    fn paint_mesh_no_setup(
+        &mut self,
         width_in_pixels: u32,
         height_in_pixels: u32,
         pixels_per_point: f32,
@@ -287,24 +320,21 @@ impl Painter {
     ) {
         debug_assert!(mesh.is_valid());
 
-        //let width_in_points = width_in_pixels as f32 / pixels_per_point;
-        //let height_in_points = height_in_pixels as f32 / pixels_per_point;
-
         if let Some(texture) = self.get_texture(mesh.texture_id) {
             unsafe {
-                gl.buffer_data_u8_slice(
+                self.gl.buffer_data_u8_slice(
                     glow::ARRAY_BUFFER,
                     as_u8_slice(mesh.vertices.as_slice()),
                     glow::STREAM_DRAW,
                 );
 
-                gl.buffer_data_u8_slice(
+                self.gl.buffer_data_u8_slice(
                     glow::ELEMENT_ARRAY_BUFFER,
                     as_u8_slice(mesh.indices.as_slice()),
                     glow::STREAM_DRAW,
                 );
 
-                gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+                self.gl.bind_texture(glow::TEXTURE_2D, Some(texture));
             }
             // Transform clip rect to physical pixels:
             let clip_min_x = pixels_per_point * clip_rect.min.x;
@@ -324,13 +354,13 @@ impl Painter {
             let clip_max_y = clip_max_y.round() as i32;
 
             unsafe {
-                gl.scissor(
+                self.gl.scissor(
                     clip_min_x,
                     height_in_pixels as i32 - clip_max_y,
                     clip_max_x - clip_min_x,
                     clip_max_y - clip_min_y,
                 );
-                gl.draw_elements(
+                self.gl.draw_elements(
                     glow::TRIANGLES,
                     mesh.indices.len() as i32,
                     glow::UNSIGNED_INT,
@@ -358,20 +388,25 @@ impl Painter {
 
     /// register glow texture as egui texture
     /// Usable for render to image rectangle
-    pub fn register_glow_texture(&mut self, texture: glow::NativeTexture) -> egui::TextureId {
+    pub unsafe fn register_glow_texture(
+        &mut self,
+        texture: glow::NativeTexture,
+    ) -> egui::TextureId {
         let id = self.alloc_user_texture();
         if let egui::TextureId::User(id) = id {
             if let Some(Some(user_texture)) = self.user_textures.get_mut(id as usize) {
-                let _old_tex = std::mem::replace(
+                if let Some(old_tex) = std::mem::replace(
                     user_texture,
                     UserTexture {
                         pixels: vec![],
                         pixels_res: (0, 0),
                         gl_texture: Some(texture),
                     },
-                );
-                // TODO
-                //unsafe { gl.delete_texture(old_tex); }
+                )
+                .gl_texture
+                {
+                    self.gl.delete_texture(old_tex);
+                }
             }
         }
         id
@@ -388,6 +423,7 @@ impl Painter {
             pixels.len(),
             "Mismatch between texture size and texel count"
         );
+        assert!(size.0 >= 1 && size.1 >= 1, "Empty texture");
 
         if let egui::TextureId::User(id) = id {
             if let Some(Some(user_texture)) = self.user_textures.get_mut(id as usize) {
@@ -397,16 +433,20 @@ impl Painter {
                     .flatten()
                     .collect();
 
-                let _old_tex = std::mem::replace(
+                if let Some(old_tex) = std::mem::replace(
                     user_texture,
                     UserTexture {
                         pixels,
                         pixels_res: size,
                         gl_texture: None,
                     },
-                );
-                // TODO
-                //unsafe { gl.delete_texture(old_tex); }
+                )
+                .gl_texture
+                {
+                    unsafe {
+                        self.gl.delete_texture(old_tex);
+                    }
+                }
             }
         }
     }
@@ -427,13 +467,13 @@ impl Painter {
         }
     }
 
-    pub fn upload_pending_user_textures(&mut self, gl: &glow::Context) {
+    pub fn upload_pending_user_textures(&mut self) {
         for user_texture in self.user_textures.iter_mut().flatten() {
             if user_texture.gl_texture.is_none() {
                 let pixels = std::mem::take(&mut user_texture.pixels);
                 user_texture.gl_texture = Some(
                     srgbtexture2d(
-                        gl,
+                        self.gl,
                         &pixels,
                         user_texture.pixels_res.0,
                         user_texture.pixels_res.1,
@@ -443,5 +483,11 @@ impl Painter {
                 user_texture.pixels_res = (0, 0);
             }
         }
+    }
+}
+
+impl Drop for Painter<'_> {
+    fn drop(&mut self) {
+        todo!()
     }
 }

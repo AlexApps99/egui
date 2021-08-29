@@ -20,6 +20,23 @@ fn srgbtexture2d(
     unsafe {
         let tex = gl.create_texture().ok()?;
         gl.bind_texture(glow::TEXTURE_2D, Some(tex));
+
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_MAG_FILTER,
+            glow::LINEAR as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_WRAP_S,
+            glow::CLAMP_TO_EDGE as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_WRAP_T,
+            glow::CLAMP_TO_EDGE as i32,
+        );
+
         gl.tex_storage_2d(glow::TEXTURE_2D, 1, glow::SRGB8_ALPHA8, w as i32, h as i32);
         gl.tex_sub_image_2d(
             glow::TEXTURE_2D,
@@ -190,6 +207,50 @@ impl Painter {
         self.egui_texture_version = Some(texture.version);
     }
 
+    unsafe fn prepare_painting(
+        &mut self,
+        display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
+        gl: &glow::Context,
+        pixels_per_point: f32,
+    ) -> (u32, u32) {
+        gl.enable(glow::SCISSOR_TEST);
+        // egui outputs mesh in both winding orders:
+        gl.disable(glow::CULL_FACE);
+
+        gl.enable(glow::BLEND);
+        gl.blend_equation(glow::FUNC_ADD);
+        gl.blend_func_separate(
+            // egui outputs colors with premultiplied alpha:
+            glow::ONE,
+            glow::ONE_MINUS_SRC_ALPHA,
+            // Less important, but this is technically the correct alpha blend function
+            // when you want to make use of the framebuffer alpha (for screenshots, compositing, etc).
+            glow::ONE_MINUS_DST_ALPHA,
+            glow::ONE,
+        );
+
+        let glutin::dpi::PhysicalSize {
+            width: width_in_pixels,
+            height: height_in_pixels,
+        } = display.window().inner_size();
+        let width_in_points = width_in_pixels as f32 / pixels_per_point;
+        let height_in_points = height_in_pixels as f32 / pixels_per_point;
+
+        gl.viewport(0, 0, width_in_pixels as i32, height_in_pixels as i32);
+        gl.use_program(Some(self.program));
+
+        // The texture coordinates for text are so that both nearest and linear should work with the egui font texture.
+        // For user textures linear sampling is more likely to be the right choice.
+        gl.uniform_2_f32(Some(&self.u_screen_size), width_in_points, height_in_points);
+        gl.uniform_1_i32(Some(&self.u_sampler), 0);
+        gl.active_texture(glow::TEXTURE0);
+
+        gl.bind_vertex_array(Some(self.va));
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vb));
+        gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.eb));
+        (width_in_pixels, height_in_pixels)
+    }
+
     /// Main entry-point for painting a frame.
     /// You should call `target.clear_color(..)` before
     /// and `target.finish()` after this.
@@ -204,89 +265,47 @@ impl Painter {
         self.upload_egui_texture(gl, egui_texture);
         self.upload_pending_user_textures(gl);
 
+        let (w, h) = unsafe { self.prepare_painting(display, gl, pixels_per_point) };
         for egui::ClippedMesh(clip_rect, mesh) in cipped_meshes {
-            self.paint_mesh(display, gl, pixels_per_point, clip_rect, &mesh)
+            self.paint_mesh(display, gl, w, h, pixels_per_point, clip_rect, &mesh)
         }
     }
 
+    // TODO have a function to set up all the needed settings
+    // Have a private version of this without that
+    // Have a public version WITH it
     #[inline(never)] // Easier profiling
     pub fn paint_mesh(
         &mut self,
-        display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
+        _display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
         gl: &glow::Context,
+        width_in_pixels: u32,
+        height_in_pixels: u32,
         pixels_per_point: f32,
         clip_rect: Rect,
         mesh: &Mesh,
     ) {
         debug_assert!(mesh.is_valid());
 
-        unsafe {
-            assert_eq!(std::mem::size_of::<Vertex>(), 20);
-            gl.bind_vertex_array(Some(self.va));
-
-            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vb));
-            gl.buffer_data_u8_slice(
-                glow::ARRAY_BUFFER,
-                as_u8_slice(mesh.vertices.as_slice()),
-                glow::STREAM_DRAW,
-            );
-
-            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.eb));
-            gl.buffer_data_u8_slice(
-                glow::ELEMENT_ARRAY_BUFFER,
-                as_u8_slice(mesh.indices.as_slice()),
-                glow::STREAM_DRAW,
-            );
-        }
-
-        let glutin::dpi::PhysicalSize {
-            width: width_in_pixels,
-            height: height_in_pixels,
-        } = display.window().inner_size();
-        let width_in_points = width_in_pixels as f32 / pixels_per_point;
-        let height_in_points = height_in_pixels as f32 / pixels_per_point;
+        //let width_in_points = width_in_pixels as f32 / pixels_per_point;
+        //let height_in_points = height_in_pixels as f32 / pixels_per_point;
 
         if let Some(texture) = self.get_texture(mesh.texture_id) {
             unsafe {
-                gl.use_program(Some(self.program));
-                // The texture coordinates for text are so that both nearest and linear should work with the egui font texture.
-                // For user textures linear sampling is more likely to be the right choice.
-                gl.uniform_2_f32(Some(&self.u_screen_size), width_in_points, height_in_points);
-                gl.uniform_1_i32(Some(&self.u_sampler), 0);
-                gl.active_texture(glow::TEXTURE0);
+                gl.buffer_data_u8_slice(
+                    glow::ARRAY_BUFFER,
+                    as_u8_slice(mesh.vertices.as_slice()),
+                    glow::STREAM_DRAW,
+                );
+
+                gl.buffer_data_u8_slice(
+                    glow::ELEMENT_ARRAY_BUFFER,
+                    as_u8_slice(mesh.indices.as_slice()),
+                    glow::STREAM_DRAW,
+                );
+
                 gl.bind_texture(glow::TEXTURE_2D, Some(texture));
-                gl.tex_parameter_i32(
-                    glow::TEXTURE_2D,
-                    glow::TEXTURE_MAG_FILTER,
-                    glow::LINEAR as i32,
-                );
-                gl.tex_parameter_i32(
-                    glow::TEXTURE_2D,
-                    glow::TEXTURE_WRAP_S,
-                    glow::CLAMP_TO_EDGE as i32,
-                );
-                gl.tex_parameter_i32(
-                    glow::TEXTURE_2D,
-                    glow::TEXTURE_WRAP_T,
-                    glow::CLAMP_TO_EDGE as i32,
-                );
-
-                gl.enable(glow::BLEND);
-                gl.blend_equation(glow::FUNC_ADD);
-                gl.blend_func_separate(
-                    // egui outputs colors with premultiplied alpha:
-                    glow::ONE,
-                    glow::ONE_MINUS_SRC_ALPHA,
-                    // Less important, but this is technically the correct alpha blend function
-                    // when you want to make use of the framebuffer alpha (for screenshots, compositing, etc).
-                    glow::ONE_MINUS_DST_ALPHA,
-                    glow::ONE,
-                );
-
-                // egui outputs mesh in both winding orders:
-                gl.disable(glow::CULL_FACE);
             }
-
             // Transform clip rect to physical pixels:
             let clip_min_x = pixels_per_point * clip_rect.min.x;
             let clip_min_y = pixels_per_point * clip_rect.min.y;
@@ -305,14 +324,12 @@ impl Painter {
             let clip_max_y = clip_max_y.round() as i32;
 
             unsafe {
-                gl.viewport(0, 0, width_in_pixels as i32, height_in_pixels as i32);
                 gl.scissor(
                     clip_min_x,
                     height_in_pixels as i32 - clip_max_y,
                     clip_max_x - clip_min_x,
                     clip_max_y - clip_min_y,
                 );
-                gl.enable(glow::SCISSOR_TEST);
                 gl.draw_elements(
                     glow::TRIANGLES,
                     mesh.indices.len() as i32,
@@ -345,11 +362,16 @@ impl Painter {
         let id = self.alloc_user_texture();
         if let egui::TextureId::User(id) = id {
             if let Some(Some(user_texture)) = self.user_textures.get_mut(id as usize) {
-                *user_texture = UserTexture {
-                    pixels: vec![],
-                    pixels_res: (0, 0),
-                    gl_texture: Some(texture),
-                }
+                let _old_tex = std::mem::replace(
+                    user_texture,
+                    UserTexture {
+                        pixels: vec![],
+                        pixels_res: (0, 0),
+                        gl_texture: Some(texture),
+                    },
+                );
+                // TODO
+                //unsafe { gl.delete_texture(old_tex); }
             }
         }
         id
@@ -375,11 +397,16 @@ impl Painter {
                     .flatten()
                     .collect();
 
-                *user_texture = UserTexture {
-                    pixels,
-                    pixels_res: size,
-                    gl_texture: None,
-                };
+                let _old_tex = std::mem::replace(
+                    user_texture,
+                    UserTexture {
+                        pixels,
+                        pixels_res: size,
+                        gl_texture: None,
+                    },
+                );
+                // TODO
+                //unsafe { gl.delete_texture(old_tex); }
             }
         }
     }

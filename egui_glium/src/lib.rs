@@ -607,4 +607,14 @@ impl EguiGlow {
             &self.egui_ctx.texture(),
         );
     }
+
+    #[cfg(debug_assertions)]
+    pub fn destruct(&mut self, gl: &glow::Context) {
+        self.painter.destruct(gl)
+    }
+
+    #[cfg(not(debug_assertions))]
+    pub fn destruct(&self, gl: &glow::Context) {
+        self.painter.destruct(gl)
+    }
 }

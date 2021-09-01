@@ -7,18 +7,12 @@ use egui::{
 
 use glow::HasContext;
 
-// TODO proper error checking, memory leaks, etc
-fn srgbtexture2d(
-    gl: &glow::Context,
-    data: &[u8],
-    w: usize,
-    h: usize,
-) -> Option<glow::NativeTexture> {
+fn srgbtexture2d(gl: &glow::Context, data: &[u8], w: usize, h: usize) -> glow::NativeTexture {
     assert_eq!(data.len(), w * h * 4);
     assert!(w >= 1);
     assert!(h >= 1);
     unsafe {
-        let tex = gl.create_texture().ok()?;
+        let tex = gl.create_texture().unwrap();
         gl.bind_texture(glow::TEXTURE_2D, Some(tex));
 
         gl.tex_parameter_i32(
@@ -49,9 +43,9 @@ fn srgbtexture2d(
             glow::UNSIGNED_BYTE,
             glow::PixelUnpackData::Slice(data),
         );
-        gl.bind_texture(glow::TEXTURE_2D, None);
+
         assert_eq!(gl.get_error(), glow::NO_ERROR);
-        Some(tex)
+        tex
     }
 }
 
@@ -72,6 +66,11 @@ pub struct Painter {
     va: glow::NativeVertexArray,
     vb: glow::NativeBuffer,
     eb: glow::NativeBuffer,
+
+    old_textures: Vec<glow::NativeTexture>,
+    // Only in debug builds, to make sure egui is used correctly
+    #[cfg(debug_assertions)]
+    destructed: bool,
 }
 
 #[derive(Default)]
@@ -137,6 +136,8 @@ impl Painter {
             let vb = gl.create_buffer().unwrap();
             let eb = gl.create_buffer().unwrap();
 
+            debug_assert_eq!(std::mem::size_of::<Vertex>(), 20);
+
             gl.bind_vertex_array(Some(va));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(vb));
 
@@ -169,6 +170,7 @@ impl Painter {
                 4 * std::mem::size_of::<f32>() as i32,
             );
             gl.enable_vertex_attrib_array(1);
+            assert_eq!(gl.get_error(), glow::NO_ERROR);
 
             Painter {
                 program,
@@ -180,11 +182,19 @@ impl Painter {
                 va,
                 vb,
                 eb,
+                old_textures: Vec::new(),
+                #[cfg(debug_assertions)]
+                destructed: false,
             }
         }
     }
 
     pub fn upload_egui_texture(&mut self, gl: &glow::Context, texture: &egui::Texture) {
+        #[cfg(debug_assertions)]
+        if self.destructed {
+            unreachable!();
+        }
+
         if self.egui_texture_version == Some(texture.version) {
             return; // No change
         }
@@ -198,7 +208,7 @@ impl Painter {
 
         if let Some(old_tex) = std::mem::replace(
             &mut self.egui_texture,
-            Some(srgbtexture2d(gl, &pixels, texture.width, texture.height).unwrap()),
+            Some(srgbtexture2d(gl, &pixels, texture.width, texture.height)),
         ) {
             unsafe {
                 gl.delete_texture(old_tex);
@@ -236,7 +246,8 @@ impl Painter {
         let width_in_points = width_in_pixels as f32 / pixels_per_point;
         let height_in_points = height_in_pixels as f32 / pixels_per_point;
 
-        gl.viewport(0, 0, width_in_pixels as i32, height_in_pixels as i32);
+        // TODO maybe don't set here?
+        //gl.viewport(0, 0, width_in_pixels as i32, height_in_pixels as i32);
         gl.use_program(Some(self.program));
 
         // The texture coordinates for text are so that both nearest and linear should work with the egui font texture.
@@ -254,6 +265,23 @@ impl Painter {
     /// Main entry-point for painting a frame.
     /// You should call `target.clear_color(..)` before
     /// and `target.finish()` after this.
+    ///
+    /// The following OpenGL features will be set:
+    /// - Scissor test will be enabled
+    /// - Cull face will be disabled
+    /// - Blend will be enabled
+    ///
+    /// The scissor area and blend parameters will be changed.
+    ///
+    /// As well as this, the following objects will be rebound:
+    /// - Vertex Array
+    /// - Vertex Buffer
+    /// - Element Buffer
+    /// - Texture (and active texture will be set to 0)
+    /// - Program
+    ///
+    /// Please be mindful of these effects when integrating into your program, and also be mindful
+    /// of the effects your program might have on this code. Look at the source if in doubt.
     pub fn paint_meshes(
         &mut self,
         display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
@@ -262,22 +290,25 @@ impl Painter {
         cipped_meshes: Vec<egui::ClippedMesh>,
         egui_texture: &egui::Texture,
     ) {
+        #[cfg(debug_assertions)]
+        if self.destructed {
+            unreachable!();
+        }
+
         self.upload_egui_texture(gl, egui_texture);
         self.upload_pending_user_textures(gl);
 
         let (w, h) = unsafe { self.prepare_painting(display, gl, pixels_per_point) };
         for egui::ClippedMesh(clip_rect, mesh) in cipped_meshes {
-            self.paint_mesh(display, gl, w, h, pixels_per_point, clip_rect, &mesh)
+            self.paint_mesh(gl, w, h, pixels_per_point, clip_rect, &mesh)
         }
+
+        assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
     }
 
-    // TODO have a function to set up all the needed settings
-    // Have a private version of this without that
-    // Have a public version WITH it
     #[inline(never)] // Easier profiling
-    pub fn paint_mesh(
+    fn paint_mesh(
         &mut self,
-        _display: &glutin::WindowedContext<glutin::PossiblyCurrent>,
         gl: &glow::Context,
         width_in_pixels: u32,
         height_in_pixels: u32,
@@ -286,9 +317,6 @@ impl Painter {
         mesh: &Mesh,
     ) {
         debug_assert!(mesh.is_valid());
-
-        //let width_in_points = width_in_pixels as f32 / pixels_per_point;
-        //let height_in_points = height_in_pixels as f32 / pixels_per_point;
 
         if let Some(texture) = self.get_texture(mesh.texture_id) {
             unsafe {
@@ -345,6 +373,11 @@ impl Painter {
     // No need to implement this in your egui integration!
 
     pub fn alloc_user_texture(&mut self) -> egui::TextureId {
+        #[cfg(debug_assertions)]
+        if self.destructed {
+            unreachable!();
+        }
+
         for (i, tex) in self.user_textures.iter_mut().enumerate() {
             if tex.is_none() {
                 *tex = Some(Default::default());
@@ -359,19 +392,27 @@ impl Painter {
     /// register glow texture as egui texture
     /// Usable for render to image rectangle
     pub fn register_glow_texture(&mut self, texture: glow::NativeTexture) -> egui::TextureId {
+        #[cfg(debug_assertions)]
+        if self.destructed {
+            unreachable!();
+        }
+
         let id = self.alloc_user_texture();
         if let egui::TextureId::User(id) = id {
             if let Some(Some(user_texture)) = self.user_textures.get_mut(id as usize) {
-                let _old_tex = std::mem::replace(
+                if let UserTexture {
+                    gl_texture: Some(old_tex),
+                    ..
+                } = std::mem::replace(
                     user_texture,
                     UserTexture {
                         pixels: vec![],
                         pixels_res: (0, 0),
                         gl_texture: Some(texture),
                     },
-                );
-                // TODO
-                //unsafe { gl.delete_texture(old_tex); }
+                ) {
+                    self.old_textures.push(old_tex);
+                }
             }
         }
         id
@@ -383,6 +424,11 @@ impl Painter {
         size: (usize, usize),
         pixels: &[Color32],
     ) {
+        #[cfg(debug_assertions)]
+        if self.destructed {
+            unreachable!();
+        }
+
         assert_eq!(
             size.0 * size.1,
             pixels.len(),
@@ -397,21 +443,29 @@ impl Painter {
                     .flatten()
                     .collect();
 
-                let _old_tex = std::mem::replace(
+                if let UserTexture {
+                    gl_texture: Some(old_tex),
+                    ..
+                } = std::mem::replace(
                     user_texture,
                     UserTexture {
                         pixels,
                         pixels_res: size,
                         gl_texture: None,
                     },
-                );
-                // TODO
-                //unsafe { gl.delete_texture(old_tex); }
+                ) {
+                    self.old_textures.push(old_tex);
+                }
             }
         }
     }
 
     pub fn free_user_texture(&mut self, id: egui::TextureId) {
+        #[cfg(debug_assertions)]
+        if self.destructed {
+            unreachable!();
+        }
+
         if let egui::TextureId::User(id) = id {
             let index = id as usize;
             if index < self.user_textures.len() {
@@ -421,6 +475,11 @@ impl Painter {
     }
 
     pub fn get_texture(&self, texture_id: egui::TextureId) -> Option<glow::NativeTexture> {
+        #[cfg(debug_assertions)]
+        if self.destructed {
+            unreachable!();
+        }
+
         match texture_id {
             egui::TextureId::Egui => self.egui_texture,
             egui::TextureId::User(id) => self.user_textures.get(id as usize)?.as_ref()?.gl_texture,
@@ -428,20 +487,80 @@ impl Painter {
     }
 
     pub fn upload_pending_user_textures(&mut self, gl: &glow::Context) {
+        #[cfg(debug_assertions)]
+        if self.destructed {
+            unreachable!();
+        }
+
         for user_texture in self.user_textures.iter_mut().flatten() {
             if user_texture.gl_texture.is_none() {
                 let pixels = std::mem::take(&mut user_texture.pixels);
-                user_texture.gl_texture = Some(
-                    srgbtexture2d(
-                        gl,
-                        &pixels,
-                        user_texture.pixels_res.0,
-                        user_texture.pixels_res.1,
-                    )
-                    .unwrap(),
-                );
+                user_texture.gl_texture = Some(srgbtexture2d(
+                    gl,
+                    &pixels,
+                    user_texture.pixels_res.0,
+                    user_texture.pixels_res.1,
+                ));
                 user_texture.pixels_res = (0, 0);
             }
         }
+        for t in self.old_textures.drain(..) {
+            unsafe {
+                gl.delete_texture(t);
+            }
+        }
+    }
+
+    unsafe fn destruct_gl(&self, gl: &glow::Context) {
+        gl.delete_program(self.program);
+        if let Some(tex) = self.egui_texture {
+            gl.delete_texture(tex);
+        }
+        for tex in &self.user_textures {
+            if let Some(UserTexture {
+                gl_texture: Some(t),
+                ..
+            }) = tex
+            {
+                gl.delete_texture(*t);
+            }
+        }
+        gl.delete_vertex_array(self.va);
+        gl.delete_buffer(self.vb);
+        gl.delete_buffer(self.eb);
+        for t in &self.old_textures {
+            gl.delete_texture(*t);
+        }
+    }
+
+    /// This function must be called before Painter is dropped, as Painter has some OpenGL objects
+    /// that should be deleted.
+
+    #[cfg(debug_assertions)]
+    pub fn destruct(&mut self, gl: &glow::Context) {
+        unsafe {
+            self.destruct_gl(gl);
+        }
+        #[cfg(debug_assertions)]
+        {
+            self.destructed = true;
+        }
+    }
+
+    #[cfg(not(debug_assertions))]
+    pub fn destruct(&self, gl: &glow::Context) {
+        unsafe {
+            self.destruct_gl(gl);
+        }
+    }
+}
+
+impl Drop for Painter {
+    fn drop(&mut self) {
+        #[cfg(debug_assertions)]
+        debug_assert!(
+            self.destructed,
+            "Make sure to destruct() rather than dropping, to avoid leaking OpenGL objects!"
+        );
     }
 }

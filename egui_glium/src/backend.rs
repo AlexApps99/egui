@@ -351,6 +351,7 @@ pub fn run(mut app: Box<dyn epi::App>, native_options: epi::NativeOptions) {
                 let clear_color = app.clear_color();
                 unsafe {
                     use glow::HasContext;
+                    gl.disable(glow::SCISSOR_TEST);
                     gl.clear_color(
                         clear_color[0],
                         clear_color[1],
@@ -415,4 +416,6 @@ pub fn run(mut app: Box<dyn epi::App>, native_options: epi::NativeOptions) {
         app.save(storage.as_mut());
         storage.flush();
     }
+
+    egui.destruct(&gl);
 }

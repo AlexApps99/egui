@@ -109,6 +109,9 @@ fn main() {
 
                 display.window().request_redraw(); // TODO: ask egui if the events warrants a repaint instead
             }
+            glutin::event::Event::LoopDestroyed => {
+                egui.destruct(&gl);
+            }
 
             _ => (),
         }

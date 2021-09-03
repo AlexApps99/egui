@@ -16,6 +16,7 @@ struct Demos {
 impl Default for Demos {
     fn default() -> Self {
         Self::from_demos(vec![
+            Box::new(super::code_editor::CodeEditor::default()),
             Box::new(super::dancing_strings::DancingStrings::default()),
             Box::new(super::drag_and_drop::DragAndDropDemo::default()),
             Box::new(super::font_book::FontBook::default()),
@@ -159,7 +160,7 @@ impl DemoWindows {
 
                 ui.separator();
 
-                ScrollArea::auto_sized().show(ui, |ui| {
+                ScrollArea::vertical().show(ui, |ui| {
                     use egui::special_emojis::{GITHUB, OS_APPLE, OS_LINUX, OS_WINDOWS};
 
                     ui.label("egui is an immediate mode GUI library written in Rust.");

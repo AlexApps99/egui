@@ -51,34 +51,12 @@ impl Rect {
         max: pos2(-f32::NAN, -f32::NAN),
     };
 
-    #[deprecated = "Use Rect::EVERYTHING"]
-    pub fn everything() -> Self {
-        let inf = f32::INFINITY;
-        Self {
-            min: pos2(-inf, -inf),
-            max: pos2(inf, inf),
-        }
-    }
-
-    #[deprecated = "Use Rect::NOTHING"]
-    pub fn nothing() -> Self {
-        let inf = f32::INFINITY;
-        Self {
-            min: pos2(inf, inf),
-            max: pos2(-inf, -inf),
-        }
-    }
-
-    #[deprecated = "Use Rect::NAN"]
-    pub fn invalid() -> Self {
-        Self::NAN
-    }
-
     #[inline(always)]
     pub const fn from_min_max(min: Pos2, max: Pos2) -> Self {
         Rect { min, max }
     }
 
+    #[inline(always)]
     pub fn from_min_size(min: Pos2, size: Vec2) -> Self {
         Rect {
             min,
@@ -86,6 +64,7 @@ impl Rect {
         }
     }
 
+    #[inline(always)]
     pub fn from_center_size(center: Pos2, size: Vec2) -> Self {
         Rect {
             min: center - size * 0.5,
@@ -93,6 +72,7 @@ impl Rect {
         }
     }
 
+    #[inline(always)]
     pub fn from_x_y_ranges(x_range: RangeInclusive<f32>, y_range: RangeInclusive<f32>) -> Self {
         Rect {
             min: pos2(*x_range.start(), *y_range.start()),
@@ -100,6 +80,7 @@ impl Rect {
         }
     }
 
+    #[inline]
     pub fn from_two_pos(a: Pos2, b: Pos2) -> Self {
         Rect {
             min: pos2(a.x.min(b.x), a.y.min(b.y)),
@@ -108,6 +89,7 @@ impl Rect {
     }
 
     /// A `Rect` that contains every point to the right of the given X coordinate.
+    #[inline]
     pub fn everything_right_of(left_x: f32) -> Self {
         let mut rect = Self::EVERYTHING;
         rect.set_left(left_x);
@@ -115,6 +97,7 @@ impl Rect {
     }
 
     /// A `Rect` that contains every point to the left of the given X coordinate.
+    #[inline]
     pub fn everything_left_of(right_x: f32) -> Self {
         let mut rect = Self::EVERYTHING;
         rect.set_right(right_x);
@@ -122,6 +105,7 @@ impl Rect {
     }
 
     /// A `Rect` that contains every point below a certain y coordinate
+    #[inline]
     pub fn everything_below(top_y: f32) -> Self {
         let mut rect = Self::EVERYTHING;
         rect.set_top(top_y);
@@ -129,6 +113,7 @@ impl Rect {
     }
 
     /// A `Rect` that contains every point above a certain y coordinate
+    #[inline]
     pub fn everything_above(bottom_y: f32) -> Self {
         let mut rect = Self::EVERYTHING;
         rect.set_bottom(bottom_y);
@@ -160,6 +145,7 @@ impl Rect {
     }
 
     #[must_use]
+    #[inline]
     pub fn translate(self, amnt: Vec2) -> Self {
         Rect::from_min_size(self.min + amnt, self.size())
     }
@@ -174,6 +160,7 @@ impl Rect {
     }
 
     #[must_use]
+    #[inline]
     pub fn intersects(self, other: Rect) -> bool {
         self.min.x <= other.max.x
             && other.min.x <= self.max.x
@@ -214,23 +201,27 @@ impl Rect {
         p.clamp(self.min, self.max)
     }
 
+    #[inline(always)]
     pub fn extend_with(&mut self, p: Pos2) {
         self.min = self.min.min(p);
         self.max = self.max.max(p);
     }
 
+    #[inline(always)]
     /// Expand to include the given x coordinate
     pub fn extend_with_x(&mut self, x: f32) {
         self.min.x = self.min.x.min(x);
         self.max.x = self.max.x.max(x);
     }
 
+    #[inline(always)]
     /// Expand to include the given y coordinate
     pub fn extend_with_y(&mut self, y: f32) {
         self.min.y = self.min.y.min(y);
         self.max.y = self.max.y.max(y);
     }
 
+    #[inline(always)]
     pub fn union(self, other: Rect) -> Rect {
         Rect {
             min: self.min.min(other.min),
@@ -283,34 +274,30 @@ impl Rect {
         }
     }
 
+    #[inline(always)]
     pub fn area(&self) -> f32 {
         self.width() * self.height()
     }
 
+    #[inline(always)]
     pub fn x_range(&self) -> RangeInclusive<f32> {
         self.min.x..=self.max.x
     }
+
+    #[inline(always)]
     pub fn y_range(&self) -> RangeInclusive<f32> {
         self.min.y..=self.max.y
     }
+
+    #[inline(always)]
     pub fn bottom_up_range(&self) -> RangeInclusive<f32> {
         self.max.y..=self.min.y
-    }
-
-    #[deprecated = "Use is_negative instead"]
-    pub fn is_empty(&self) -> bool {
-        self.max.x < self.min.x || self.max.y < self.min.y
     }
 
     /// `width < 0 || height < 0`
     #[inline(always)]
     pub fn is_negative(&self) -> bool {
         self.max.x < self.min.x || self.max.y < self.min.y
-    }
-
-    #[deprecated = "Use !is_negative() instead"]
-    pub fn is_non_negative(&self) -> bool {
-        !self.is_negative()
     }
 
     /// `width > 0 && height > 0`

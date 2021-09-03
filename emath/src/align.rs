@@ -3,7 +3,7 @@
 use crate::*;
 
 /// left/center/right or top/center/bottom alignment for e.g. anchors and layouts.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum Align {
@@ -26,23 +26,6 @@ impl Align {
     pub const TOP: Self = Self::Min;
     /// Convenience for [`Self::Max`]
     pub const BOTTOM: Self = Self::Max;
-
-    #[deprecated = "Use Self::LEFT"]
-    pub fn left() -> Self {
-        Self::LEFT
-    }
-    #[deprecated = "Use Self::RIGHT"]
-    pub fn right() -> Self {
-        Self::RIGHT
-    }
-    #[deprecated = "Use Self::TOP"]
-    pub fn top() -> Self {
-        Self::TOP
-    }
-    #[deprecated = "Use Self::BOTTOM"]
-    pub fn bottom() -> Self {
-        Self::BOTTOM
-    }
 
     /// Convert `Min => 0.0`, `Center => 0.5` or `Max => 1.0`.
     #[inline(always)]
@@ -117,7 +100,7 @@ impl Default for Align {
 // ----------------------------------------------------------------------------
 
 /// Two-dimension alignment, e.g. [`Align2::LEFT_TOP`].
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub struct Align2(pub [Align; 2]);
@@ -186,6 +169,22 @@ impl Align2 {
         };
 
         pos2(x, y)
+    }
+}
+
+impl std::ops::Index<usize> for Align2 {
+    type Output = Align;
+
+    #[inline(always)]
+    fn index(&self, index: usize) -> &Align {
+        &self.0[index]
+    }
+}
+
+impl std::ops::IndexMut<usize> for Align2 {
+    #[inline(always)]
+    fn index_mut(&mut self, index: usize) -> &mut Align {
+        &mut self.0[index]
     }
 }
 

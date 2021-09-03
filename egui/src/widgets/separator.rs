@@ -26,11 +26,6 @@ impl Default for Separator {
 }
 
 impl Separator {
-    #[deprecated = "Use Separator::default() instead"]
-    pub fn new() -> Self {
-        Self::default()
-    }
-
     /// How much space we take up. The line is painted in the middle of this.
     pub fn spacing(mut self, spacing: f32) -> Self {
         self.spacing = spacing;
@@ -64,7 +59,7 @@ impl Widget for Separator {
         let is_horizontal_line = is_horizontal_line
             .unwrap_or_else(|| ui.is_grid() || !ui.layout().main_dir().is_horizontal());
 
-        let available_space = ui.available_size_before_wrap_finite();
+        let available_space = ui.available_size_before_wrap();
 
         let size = if is_horizontal_line {
             vec2(available_space.x, spacing)

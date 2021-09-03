@@ -22,8 +22,6 @@
 #![warn(clippy::all, rust_2018_idioms)]
 
 pub mod backend;
-#[cfg(feature = "http")]
-pub mod http;
 mod painter;
 pub mod screen_reader;
 pub mod webgl1;
@@ -852,26 +850,24 @@ fn install_canvas_events(runner_ref: &AppRunnerRef) -> Result<(), JsValue> {
         let event_name = "mousedown";
         let runner_ref = runner_ref.clone();
         let closure = Closure::wrap(Box::new(move |event: web_sys::MouseEvent| {
-            let mut runner_lock = runner_ref.0.lock();
-            if !runner_lock.input.is_touch {
-                if let Some(button) = button_from_mouse_event(&event) {
-                    let pos = pos_from_mouse_event(runner_lock.canvas_id(), &event);
-                    let modifiers = runner_lock.input.raw.modifiers;
-                    runner_lock
-                        .input
-                        .raw
-                        .events
-                        .push(egui::Event::PointerButton {
-                            pos,
-                            button,
-                            pressed: true,
-                            modifiers,
-                        });
-                    runner_lock.needs_repaint.set_true();
-                    event.stop_propagation();
-                    event.prevent_default();
-                }
+            if let Some(button) = button_from_mouse_event(&event) {
+                let mut runner_lock = runner_ref.0.lock();
+                let pos = pos_from_mouse_event(runner_lock.canvas_id(), &event);
+                let modifiers = runner_lock.input.raw.modifiers;
+                runner_lock
+                    .input
+                    .raw
+                    .events
+                    .push(egui::Event::PointerButton {
+                        pos,
+                        button,
+                        pressed: true,
+                        modifiers,
+                    });
+                runner_lock.needs_repaint.set_true();
             }
+            event.stop_propagation();
+            event.prevent_default();
         }) as Box<dyn FnMut(_)>);
         canvas.add_event_listener_with_callback(event_name, closure.as_ref().unchecked_ref())?;
         closure.forget();
@@ -882,17 +878,15 @@ fn install_canvas_events(runner_ref: &AppRunnerRef) -> Result<(), JsValue> {
         let runner_ref = runner_ref.clone();
         let closure = Closure::wrap(Box::new(move |event: web_sys::MouseEvent| {
             let mut runner_lock = runner_ref.0.lock();
-            if !runner_lock.input.is_touch {
-                let pos = pos_from_mouse_event(runner_lock.canvas_id(), &event);
-                runner_lock
-                    .input
-                    .raw
-                    .events
-                    .push(egui::Event::PointerMoved(pos));
-                runner_lock.needs_repaint.set_true();
-                event.stop_propagation();
-                event.prevent_default();
-            }
+            let pos = pos_from_mouse_event(runner_lock.canvas_id(), &event);
+            runner_lock
+                .input
+                .raw
+                .events
+                .push(egui::Event::PointerMoved(pos));
+            runner_lock.needs_repaint.set_true();
+            event.stop_propagation();
+            event.prevent_default();
         }) as Box<dyn FnMut(_)>);
         canvas.add_event_listener_with_callback(event_name, closure.as_ref().unchecked_ref())?;
         closure.forget();
@@ -902,27 +896,25 @@ fn install_canvas_events(runner_ref: &AppRunnerRef) -> Result<(), JsValue> {
         let event_name = "mouseup";
         let runner_ref = runner_ref.clone();
         let closure = Closure::wrap(Box::new(move |event: web_sys::MouseEvent| {
-            let mut runner_lock = runner_ref.0.lock();
-            if !runner_lock.input.is_touch {
-                if let Some(button) = button_from_mouse_event(&event) {
-                    let pos = pos_from_mouse_event(runner_lock.canvas_id(), &event);
-                    let modifiers = runner_lock.input.raw.modifiers;
-                    runner_lock
-                        .input
-                        .raw
-                        .events
-                        .push(egui::Event::PointerButton {
-                            pos,
-                            button,
-                            pressed: false,
-                            modifiers,
-                        });
-                    runner_lock.needs_repaint.set_true();
-                    event.stop_propagation();
-                    event.prevent_default();
-                }
+            if let Some(button) = button_from_mouse_event(&event) {
+                let mut runner_lock = runner_ref.0.lock();
+                let pos = pos_from_mouse_event(runner_lock.canvas_id(), &event);
+                let modifiers = runner_lock.input.raw.modifiers;
+                runner_lock
+                    .input
+                    .raw
+                    .events
+                    .push(egui::Event::PointerButton {
+                        pos,
+                        button,
+                        pressed: false,
+                        modifiers,
+                    });
+                runner_lock.needs_repaint.set_true();
                 manipulate_agent(runner_lock.canvas_id(), runner_lock.input.latest_touch_pos);
             }
+            event.stop_propagation();
+            event.prevent_default();
         }) as Box<dyn FnMut(_)>);
         canvas.add_event_listener_with_callback(event_name, closure.as_ref().unchecked_ref())?;
         closure.forget();
@@ -933,12 +925,10 @@ fn install_canvas_events(runner_ref: &AppRunnerRef) -> Result<(), JsValue> {
         let runner_ref = runner_ref.clone();
         let closure = Closure::wrap(Box::new(move |event: web_sys::MouseEvent| {
             let mut runner_lock = runner_ref.0.lock();
-            if !runner_lock.input.is_touch {
-                runner_lock.input.raw.events.push(egui::Event::PointerGone);
-                runner_lock.needs_repaint.set_true();
-                event.stop_propagation();
-                event.prevent_default();
-            }
+            runner_lock.input.raw.events.push(egui::Event::PointerGone);
+            runner_lock.needs_repaint.set_true();
+            event.stop_propagation();
+            event.prevent_default();
         }) as Box<dyn FnMut(_)>);
         canvas.add_event_listener_with_callback(event_name, closure.as_ref().unchecked_ref())?;
         closure.forget();
@@ -954,7 +944,6 @@ fn install_canvas_events(runner_ref: &AppRunnerRef) -> Result<(), JsValue> {
                 pos_from_touch_event(runner_lock.canvas_id(), &event, &mut latest_touch_pos_id);
             runner_lock.input.latest_touch_pos_id = latest_touch_pos_id;
             runner_lock.input.latest_touch_pos = Some(pos);
-            runner_lock.input.is_touch = true;
             let modifiers = runner_lock.input.raw.modifiers;
             runner_lock
                 .input
@@ -986,7 +975,6 @@ fn install_canvas_events(runner_ref: &AppRunnerRef) -> Result<(), JsValue> {
                 pos_from_touch_event(runner_lock.canvas_id(), &event, &mut latest_touch_pos_id);
             runner_lock.input.latest_touch_pos_id = latest_touch_pos_id;
             runner_lock.input.latest_touch_pos = Some(pos);
-            runner_lock.input.is_touch = true;
             runner_lock
                 .input
                 .raw
@@ -1007,7 +995,6 @@ fn install_canvas_events(runner_ref: &AppRunnerRef) -> Result<(), JsValue> {
         let runner_ref = runner_ref.clone();
         let closure = Closure::wrap(Box::new(move |event: web_sys::TouchEvent| {
             let mut runner_lock = runner_ref.0.lock();
-            runner_lock.input.is_touch = true;
             if let Some(pos) = runner_lock.input.latest_touch_pos {
                 let modifiers = runner_lock.input.raw.modifiers;
                 // First release mouse to click:
@@ -1042,7 +1029,6 @@ fn install_canvas_events(runner_ref: &AppRunnerRef) -> Result<(), JsValue> {
         let runner_ref = runner_ref.clone();
         let closure = Closure::wrap(Box::new(move |event: web_sys::TouchEvent| {
             let mut runner_lock = runner_ref.0.lock();
-            runner_lock.input.is_touch = true;
             push_touches(&mut *runner_lock, egui::TouchPhase::Cancel, &event);
             event.stop_propagation();
             event.prevent_default();

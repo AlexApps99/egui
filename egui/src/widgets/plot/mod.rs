@@ -257,18 +257,6 @@ impl Plot {
         self
     }
 
-    #[deprecated = "Renamed center_x_axis"]
-    pub fn symmetrical_x_axis(mut self, on: bool) -> Self {
-        self.center_x_axis = on;
-        self
-    }
-
-    #[deprecated = "Renamed center_y_axis"]
-    pub fn symmetrical_y_axis(mut self, on: bool) -> Self {
-        self.center_y_axis = on;
-        self
-    }
-
     /// Always keep the x-axis centered. Default: `false`.
     pub fn center_x_axis(mut self, on: bool) -> Self {
         self.center_x_axis = on;
@@ -304,13 +292,6 @@ impl Plot {
     /// For instance, to always show the x axis, call `plot.include_y(0.0)`.
     pub fn include_y(mut self, y: impl Into<f64>) -> Self {
         self.min_auto_bounds.extend_with_y(y.into());
-        self
-    }
-
-    #[deprecated = "Use `Plot::legend` instead"]
-    /// Whether to show a legend including all named items. Default: `true`.
-    pub fn show_legend(mut self, show: bool) -> Self {
-        self.legend_config = show.then(Legend::default);
         self
     }
 
@@ -401,7 +382,7 @@ impl Widget for Plot {
                     if let (Some(height), Some(aspect)) = (height, view_aspect) {
                         height * aspect
                     } else {
-                        ui.available_size_before_wrap_finite().x
+                        ui.available_size_before_wrap().x
                     }
                 })
                 .at_least(min_size.x);
@@ -411,7 +392,7 @@ impl Widget for Plot {
                     if let Some(aspect) = view_aspect {
                         width / aspect
                     } else {
-                        ui.available_size_before_wrap_finite().y
+                        ui.available_size_before_wrap().y
                     }
                 })
                 .at_least(min_size.y);
@@ -645,7 +626,7 @@ impl Prepared {
                 let color = color_from_alpha(ui, text_alpha);
                 let text = emath::round_to_decimals(value_main, 5).to_string(); // hack
 
-                let galley = ui.fonts().layout_single_line(text_style, text);
+                let galley = ui.painter().layout_no_wrap(text, text_style, color);
 
                 let mut text_pos = pos_in_gui + vec2(1.0, -galley.size.y);
 
@@ -654,12 +635,7 @@ impl Prepared {
                     .at_most(transform.frame().max[1 - axis] - galley.size[1 - axis] - 2.0)
                     .at_least(transform.frame().min[1 - axis] + 1.0);
 
-                shapes.push(Shape::Text {
-                    pos: text_pos,
-                    galley,
-                    color,
-                    fake_italics: false,
-                });
+                shapes.push(Shape::galley(text_pos, galley));
             }
         }
 

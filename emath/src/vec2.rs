@@ -112,16 +112,6 @@ impl Vec2 {
     pub const ZERO: Self = Self { x: 0.0, y: 0.0 };
     pub const INFINITY: Self = Self::splat(f32::INFINITY);
 
-    #[deprecated = "Use Vec2::ZERO instead"]
-    pub fn zero() -> Self {
-        Self::ZERO
-    }
-
-    #[deprecated = "Use Vec2::INFINITY instead"]
-    pub fn infinity() -> Self {
-        Self::INFINITY
-    }
-
     #[inline(always)]
     pub const fn new(x: f32, y: f32) -> Self {
         Self { x, y }
@@ -137,7 +127,10 @@ impl Vec2 {
     /// `v.to_pos2()` is equivalent to `Pos2::default() + v`.
     #[inline(always)]
     pub fn to_pos2(self) -> crate::Pos2 {
-        crate::Pos2::new(self.x, self.y)
+        crate::Pos2 {
+            x: self.x,
+            y: self.y,
+        }
     }
 
     /// Safe normalize: returns zero if input is zero.

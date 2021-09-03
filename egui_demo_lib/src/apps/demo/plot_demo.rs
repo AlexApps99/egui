@@ -75,8 +75,7 @@ impl LineDemo {
                     .on_hover_text("Always keep the viewport square.");
                 ui.checkbox(proportional, "Proportional data axes")
                     .on_hover_text("Tick are the same size on both axes.");
-            });
-            ui.vertical(|ui| {
+
                 ComboBox::from_label("Line style")
                     .selected_text(line_style.to_string())
                     .show_ui(ui, |ui| {
@@ -402,7 +401,7 @@ impl super::Demo for PlotDemo {
         Window::new(self.name())
             .open(open)
             .default_size(vec2(400.0, 400.0))
-            .scroll(false)
+            .vscroll(false)
             .show(ctx, |ui| self.ui(ui));
     }
 }

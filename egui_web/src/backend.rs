@@ -78,9 +78,6 @@ impl WebBackend {
 /// Data gathered between frames.
 #[derive(Default)]
 pub struct WebInput {
-    /// Is this a touch screen? If so, we ignore mouse events.
-    pub is_touch: bool,
-
     /// Required because we don't get a position on touched
     pub latest_touch_pos: Option<egui::Pos2>,
 
@@ -140,8 +137,6 @@ pub struct AppRunner {
     prefer_dark_mode: Option<bool>,
     last_save_time: f64,
     screen_reader: crate::screen_reader::ScreenReader,
-    #[cfg(feature = "http")]
-    http: Arc<http::WebHttp>,
     pub(crate) last_text_cursor_pos: Option<egui::Pos2>,
 }
 
@@ -168,8 +163,6 @@ impl AppRunner {
             prefer_dark_mode,
             last_save_time: now_sec(),
             screen_reader: Default::default(),
-            #[cfg(feature = "http")]
-            http: Arc::new(http::WebHttp {}),
             last_text_cursor_pos: None,
         };
 
@@ -178,8 +171,6 @@ impl AppRunner {
             let mut frame = epi::backend::FrameBuilder {
                 info: runner.integration_info(),
                 tex_allocator: runner.web_backend.painter.as_tex_allocator(),
-                #[cfg(feature = "http")]
-                http: runner.http.clone(),
                 output: &mut app_output,
                 repaint_signal: runner.needs_repaint.clone(),
             }
@@ -250,8 +241,6 @@ impl AppRunner {
         let mut frame = epi::backend::FrameBuilder {
             info: self.integration_info(),
             tex_allocator: self.web_backend.painter.as_tex_allocator(),
-            #[cfg(feature = "http")]
-            http: self.http.clone(),
             output: &mut app_output,
             repaint_signal: self.needs_repaint.clone(),
         }

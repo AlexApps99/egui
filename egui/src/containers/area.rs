@@ -168,7 +168,7 @@ impl Area {
 pub(crate) struct Prepared {
     layer_id: LayerId,
     state: State,
-    movable: bool,
+    pub(crate) movable: bool,
     enabled: bool,
     drag_bounds: Option<Rect>,
 }
@@ -274,7 +274,18 @@ impl Prepared {
     }
 
     pub(crate) fn content_ui(&self, ctx: &CtxRef) -> Ui {
-        let max_rect = Rect::from_min_size(self.state.pos, Vec2::INFINITY);
+        let max_rect = if ctx.available_rect().contains(self.state.pos) {
+            Rect::from_min_max(self.state.pos, ctx.available_rect().max)
+        } else {
+            Rect::from_min_max(
+                self.state.pos,
+                ctx.input()
+                    .screen_rect()
+                    .max
+                    .max(self.state.pos + Vec2::splat(32.0)),
+            )
+        };
+
         let shadow_radius = ctx.style().visuals.window_shadow.extrusion; // hacky
         let bounds = self.drag_bounds.unwrap_or_else(|| ctx.input().screen_rect);
 
@@ -337,10 +348,11 @@ impl Prepared {
             state.pos += ctx.input().pointer.delta();
         }
 
-        if let Some(bounds) = drag_bounds {
-            state.pos = ctx.constrain_window_rect_to_area(state.rect(), bounds).min;
-        } else {
-            state.pos = ctx.constrain_window_rect(state.rect()).min;
+        // Important check - don't try to move e.g. a combobox popup!
+        if movable {
+            state.pos = ctx
+                .constrain_window_rect_to_area(state.rect(), drag_bounds)
+                .min;
         }
 
         if (move_response.dragged() || move_response.clicked())

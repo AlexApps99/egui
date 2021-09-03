@@ -1,6 +1,6 @@
 [package]
 name = "egui"
-version = "0.14.0"
+version = "0.14.2"
 authors = ["Emil Ernerfeldt <emil.ernerfeldt@gmail.com>"]
 description = "Simple, portable immediate mode GUI library for Rust"
 edition = "2018"
@@ -16,6 +16,9 @@ include = [
   "**/*.rs",
   "Cargo.toml",
 ]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [lib]
 

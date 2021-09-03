@@ -59,11 +59,6 @@ impl Placer {
     }
 
     #[inline(always)]
-    pub(crate) fn max_rect_finite(&self) -> Rect {
-        self.region.max_rect_finite()
-    }
-
-    #[inline(always)]
     pub(crate) fn force_set_min_rect(&mut self, min_rect: Rect) {
         self.region.min_rect = min_rect;
     }
@@ -96,14 +91,6 @@ impl Placer {
         }
     }
 
-    pub(crate) fn available_rect_before_wrap_finite(&self) -> Rect {
-        if let Some(grid) = &self.grid {
-            grid.available_rect_finite(&self.region)
-        } else {
-            self.layout.available_rect_before_wrap_finite(&self.region)
-        }
-    }
-
     /// Amount of space available for a widget.
     /// For wrapping layouts, this is the maximum (after wrap).
     pub(crate) fn available_size(&self) -> Vec2 {
@@ -119,6 +106,7 @@ impl Placer {
     /// This is what you then pass to `advance_after_rects`.
     /// Use `justify_and_align` to get the inner `widget_rect`.
     pub(crate) fn next_space(&self, child_size: Vec2, item_spacing: Vec2) -> Rect {
+        self.region.sanity_check();
         if let Some(grid) = &self.grid {
             grid.next_cell(self.region.cursor, child_size)
         } else {
@@ -169,6 +157,10 @@ impl Placer {
         widget_rect: Rect,
         item_spacing: Vec2,
     ) {
+        egui_assert!(!frame_rect.any_nan());
+        egui_assert!(!widget_rect.any_nan());
+        self.region.sanity_check();
+
         if let Some(grid) = &mut self.grid {
             grid.advance(&mut self.region.cursor, frame_rect, widget_rect)
         } else {
@@ -181,6 +173,8 @@ impl Placer {
         }
 
         self.expand_to_include_rect(frame_rect); // e.g. for centered layouts: pretend we used whole frame
+
+        self.region.sanity_check();
     }
 
     /// Move to the next row in a grid layout or wrapping layout.
@@ -231,6 +225,8 @@ impl Placer {
 
         region.cursor.min.x = region.max_rect.min.x;
         region.cursor.max.x = region.max_rect.max.x;
+
+        region.sanity_check();
     }
 
     /// Set the maximum height of the ui.
@@ -244,6 +240,8 @@ impl Placer {
 
         region.cursor.min.y = region.max_rect.min.y;
         region.cursor.max.y = region.max_rect.max.y;
+
+        region.sanity_check();
     }
 
     /// Set the minimum width of the ui.

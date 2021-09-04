@@ -5,7 +5,12 @@ use egui::{
     epaint::{Color32, Mesh, Vertex},
 };
 
+use std::convert::TryInto;
+
 use glow::HasContext;
+
+const VERT_SRC: &str = include_str!("shader/vertex.glsl");
+const FRAG_SRC: &str = include_str!("shader/fragment.glsl");
 
 fn srgbtexture2d(gl: &glow::Context, data: &[u8], w: usize, h: usize) -> glow::NativeTexture {
     assert_eq!(data.len(), w * h * 4);
@@ -85,6 +90,7 @@ struct UserTexture {
 }
 
 #[derive(Copy, Clone, Debug)]
+#[allow(dead_code)]
 pub enum ShaderVersion {
     Gl120,
     Gl140,
@@ -92,34 +98,61 @@ pub enum ShaderVersion {
     Es300,
 }
 
-impl Painter {
-    pub fn new(gl: &glow::Context, ver: ShaderVersion) -> Painter {
-        use ShaderVersion::*;
-        let (v_src, f_src) = match ver {
-            Gl120 => (
-                include_str!("shader/vertex_120.glsl"),
-                include_str!("shader/fragment_120.glsl"),
-            ),
-            Gl140 => (
-                include_str!("shader/vertex_140.glsl"),
-                include_str!("shader/fragment_140.glsl"),
-            ),
-            Es100 => (
-                include_str!("shader/vertex_100es.glsl"),
-                include_str!("shader/fragment_100es.glsl"),
-            ),
-            Es300 => (
-                include_str!("shader/vertex_300es.glsl"),
-                include_str!("shader/fragment_300es.glsl"),
-            ),
-        };
+impl ShaderVersion {
+    fn get(gl: &glow::Context) -> Self {
+        let glsl_ver = unsafe { gl.get_parameter_string(glow::SHADING_LANGUAGE_VERSION) };
+        let start = glsl_ver.find(|c| char::is_ascii_digit(&c)).unwrap();
+        let es = glsl_ver[..start].contains("ES");
+        let ver = glsl_ver[start..].splitn(1, ' ').next().unwrap();
+        let [maj, min]: [u8; 2] = ver
+            .splitn(3, '.')
+            .take(2)
+            .map(|x| x.parse().unwrap_or_default())
+            .collect::<Vec<u8>>()
+            .try_into()
+            .unwrap();
+        // TODO Kept in while PR is WIP, so people can make sure it's detecting the correct version
+        eprintln!(
+            "{}\n{}.{}{}",
+            glsl_ver,
+            maj,
+            min,
+            if es { " ES" } else { "" }
+        );
+        if es {
+            if maj >= 3 {
+                Self::Es300
+            } else {
+                Self::Es100
+            }
+        } else if maj > 1 || (maj == 1 && min >= 40) {
+            Self::Gl140
+        } else {
+            Self::Gl120
+        }
+    }
 
+    fn version(&self) -> &'static str {
+        match self {
+            Self::Gl120 => "#version 120\n",
+            Self::Gl140 => "#version 140\n",
+            Self::Es100 => "#version 100\n",
+            Self::Es300 => "#version 300 es\n",
+        }
+    }
+}
+
+impl Painter {
+    pub fn new(gl: &glow::Context) -> Painter {
+        let header = ShaderVersion::get(gl).version();
+        let v_src = header.to_owned() + VERT_SRC;
+        let f_src = header.to_owned() + FRAG_SRC;
         // TODO error handling
         unsafe {
             let v = gl.create_shader(glow::VERTEX_SHADER).unwrap();
             let f = gl.create_shader(glow::FRAGMENT_SHADER).unwrap();
-            gl.shader_source(v, v_src);
-            gl.shader_source(f, f_src);
+            gl.shader_source(v, &v_src);
+            gl.shader_source(f, &f_src);
             gl.compile_shader(v);
             gl.compile_shader(f);
             let program = gl.create_program().unwrap();

@@ -506,8 +506,7 @@ impl EguiGlow {
             input_state: crate::GlowInputState::from_pixels_per_point(
                 crate::native_pixels_per_point(display.window()),
             ),
-            // TODO
-            painter: crate::Painter::new(gl, painter::ShaderVersion::Gl140),
+            painter: crate::Painter::new(gl),
             current_cursor_icon: egui::CursorIcon::Default,
             screen_reader: crate::screen_reader::ScreenReader::default(),
         }

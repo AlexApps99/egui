@@ -29,6 +29,37 @@ fn deserialize_memory(_: &Option<Box<dyn epi::Storage>>) -> Option<egui::Memory>
     None
 }
 
+fn glow_debug_message_callback(
+    debug_source: u32,
+    debug_type: u32,
+    _id: u32,
+    _debug_severity: u32,
+    msg: &str,
+) {
+    let src = match debug_source {
+        glow::DEBUG_SOURCE_API => "API",
+        glow::DEBUG_SOURCE_WINDOW_SYSTEM => "Window System",
+        glow::DEBUG_SOURCE_SHADER_COMPILER => "Shader Compiler",
+        glow::DEBUG_SOURCE_THIRD_PARTY => "Third-party",
+        glow::DEBUG_SOURCE_APPLICATION => "Application",
+        _ => "Other",
+    };
+
+    let ty = match debug_type {
+        glow::DEBUG_TYPE_ERROR => "Error",
+        glow::DEBUG_TYPE_DEPRECATED_BEHAVIOR => "Deprecated behavior",
+        glow::DEBUG_TYPE_UNDEFINED_BEHAVIOR => "Undefined behavior",
+        glow::DEBUG_TYPE_PORTABILITY => "Portability",
+        glow::DEBUG_TYPE_PERFORMANCE => "Performance",
+        glow::DEBUG_TYPE_MARKER => "Marker",
+        glow::DEBUG_TYPE_PUSH_GROUP => "Push group",
+        glow::DEBUG_TYPE_POP_GROUP => "Pop group",
+        _ => "Other",
+    };
+
+    eprintln!("OpenGL {} {}: `{}`", src, ty, msg);
+}
+
 impl epi::TextureAllocator for Painter {
     fn alloc_srgba_premultiplied(
         &mut self,
@@ -112,6 +143,9 @@ fn create_display(
             .with_srgb(true)
             .with_stencil_buffer(0)
             .with_vsync(true)
+            .with_gl_debug_flag(true)
+            .with_gl(glutin::GlRequest::Latest)
+            .with_gl_profile(glutin::GlProfile::Core)
             .build_windowed(window_builder, event_loop)
             .unwrap()
             .make_current()
@@ -133,6 +167,20 @@ fn create_display(
 
     unsafe {
         use glow::HasContext;
+        if ((gl.get_parameter_i32(glow::CONTEXT_FLAGS) & glow::CONTEXT_FLAG_DEBUG_BIT as i32)
+            != 0)
+            && gl.supports_debug()
+        {
+            gl.enable(glow::DEBUG_OUTPUT);
+            gl.debug_message_callback(glow_debug_message_callback);
+            gl.debug_message_control(
+                glow::DONT_CARE,
+                glow::DONT_CARE,
+                glow::DONT_CARE,
+                &[],
+                true,
+            );
+        }
         gl.enable(glow::FRAMEBUFFER_SRGB);
     }
 

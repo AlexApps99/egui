@@ -302,8 +302,6 @@ impl Painter {
         let width_in_points = width_in_pixels as f32 / pixels_per_point;
         let height_in_points = height_in_pixels as f32 / pixels_per_point;
 
-        // TODO maybe don't set here?
-        //gl.viewport(0, 0, width_in_pixels as i32, height_in_pixels as i32);
         gl.use_program(Some(self.program));
 
         // The texture coordinates for text are so that both nearest and linear should work with the egui font texture.

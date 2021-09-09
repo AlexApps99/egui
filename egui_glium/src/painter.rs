@@ -150,15 +150,34 @@ impl Painter {
         // TODO error handling
         unsafe {
             let v = gl.create_shader(glow::VERTEX_SHADER).unwrap();
-            let f = gl.create_shader(glow::FRAGMENT_SHADER).unwrap();
             gl.shader_source(v, &v_src);
-            gl.shader_source(f, &f_src);
             gl.compile_shader(v);
+            if !gl.get_shader_compile_status(v) {
+                panic!(
+                    "Failed to compile vertex shader: {}",
+                    gl.get_shader_info_log(v)
+                );
+            }
+
+            let f = gl.create_shader(glow::FRAGMENT_SHADER).unwrap();
+            gl.shader_source(f, &f_src);
             gl.compile_shader(f);
+            if !gl.get_shader_compile_status(f) {
+                panic!(
+                    "Failed to compile fragment shader: {}",
+                    gl.get_shader_info_log(f)
+                );
+            }
+
             let program = gl.create_program().unwrap();
             gl.attach_shader(program, v);
             gl.attach_shader(program, f);
             gl.link_program(program);
+            if !gl.get_program_link_status(program) {
+                panic!("{}", gl.get_program_info_log(program));
+            }
+            gl.detach_shader(program, v);
+            gl.detach_shader(program, f);
             gl.delete_shader(v);
             gl.delete_shader(f);
 
@@ -174,35 +193,39 @@ impl Painter {
             gl.bind_vertex_array(Some(va));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(vb));
 
+            let a_pos_loc = gl.get_attrib_location(program, "a_pos").unwrap();
+            let a_tc_loc = gl.get_attrib_location(program, "a_tc").unwrap();
+            let a_srgba_loc = gl.get_attrib_location(program, "a_srgba").unwrap();
+
             gl.vertex_attrib_pointer_f32(
-                0,
+                a_pos_loc,
                 2,
                 glow::FLOAT,
                 false,
                 std::mem::size_of::<Vertex>() as i32,
                 0,
             );
-            gl.enable_vertex_attrib_array(0);
+            gl.enable_vertex_attrib_array(a_pos_loc);
 
             gl.vertex_attrib_pointer_f32(
-                2,
+                a_tc_loc,
                 2,
                 glow::FLOAT,
                 false,
                 std::mem::size_of::<Vertex>() as i32,
                 2 * std::mem::size_of::<f32>() as i32,
             );
-            gl.enable_vertex_attrib_array(2);
+            gl.enable_vertex_attrib_array(a_tc_loc);
 
             gl.vertex_attrib_pointer_f32(
-                1,
+                a_srgba_loc,
                 4,
                 glow::UNSIGNED_BYTE,
                 false,
                 std::mem::size_of::<Vertex>() as i32,
                 4 * std::mem::size_of::<f32>() as i32,
             );
-            gl.enable_vertex_attrib_array(1);
+            gl.enable_vertex_attrib_array(a_srgba_loc);
             assert_eq!(gl.get_error(), glow::NO_ERROR);
 
             Painter {

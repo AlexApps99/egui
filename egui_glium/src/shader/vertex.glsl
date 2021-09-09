@@ -1,4 +1,4 @@
-#if !defined(GL_ES) && __VERSION >= 140
+#if !defined(GL_ES) && __VERSION__ >= 140
 #define I in
 #define O out
 #define V(x) x

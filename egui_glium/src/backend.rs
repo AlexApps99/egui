@@ -294,6 +294,7 @@ pub fn run(mut app: Box<dyn epi::App>, native_options: epi::NativeOptions) {
                         height: height_in_pixels,
                     }) = event
                     {
+                        println!("{}x{}", width_in_pixels, height_in_pixels);
                         unsafe {
                             use glow::HasContext;
                             gl.viewport(0, 0, width_in_pixels as i32, height_in_pixels as i32);

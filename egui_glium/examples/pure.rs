@@ -105,15 +105,8 @@ fn main() {
                     *control_flow = glutin::event_loop::ControlFlow::Exit;
                 }
 
-                if let glutin::event::WindowEvent::Resized(glutin::dpi::PhysicalSize {
-                    width: width_in_pixels,
-                    height: height_in_pixels,
-                }) = event
-                {
-                    unsafe {
-                        use glow::HasContext;
-                        gl.viewport(0, 0, width_in_pixels as i32, height_in_pixels as i32);
-                    }
+                if let glutin::event::WindowEvent::Resized(physical_size) = event {
+                    display.resize(physical_size);
                 }
 
                 egui.on_event(&event);

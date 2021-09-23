@@ -7,7 +7,7 @@
 
 // Forbid warnings in release builds:
 #![cfg_attr(not(debug_assertions), deny(warnings))]
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 #![warn(
     clippy::all,
     clippy::await_holding_lock,
@@ -88,8 +88,6 @@ pub use painter::Painter;
 pub use egui_for_winit;
 pub use epi::NativeOptions;
 
-use glium::glutin;
-
 // ----------------------------------------------------------------------------
 
 /// Time of day as seconds since midnight. Used for clock in demo app.
@@ -106,13 +104,13 @@ pub fn seconds_since_midnight() -> Option<f64> {
     None
 }
 
-pub fn screen_size_in_pixels(display: &glium::Display) -> egui::Vec2 {
-    let (width_in_pixels, height_in_pixels) = display.get_framebuffer_dimensions();
-    egui::vec2(width_in_pixels as f32, height_in_pixels as f32)
+pub fn screen_size_in_pixels(window: &glutin::window::Window) -> egui::Vec2 {
+    let glutin::dpi::PhysicalSize { width, height } = window.inner_size();
+    egui::vec2(width as f32, height as f32)
 }
 
-pub fn native_pixels_per_point(display: &glium::Display) -> f32 {
-    display.gl_window().window().scale_factor() as f32
+pub fn native_pixels_per_point(window: &glutin::window::Window) -> f32 {
+    window.scale_factor() as f32
 }
 
 // ----------------------------------------------------------------------------
@@ -125,11 +123,14 @@ pub struct EguiGlium {
 }
 
 impl EguiGlium {
-    pub fn new(display: &glium::Display) -> Self {
+    pub fn new(
+        gl_window: &glutin::WindowedContext<glutin::PossiblyCurrent>,
+        gl: &glow::Context,
+    ) -> Self {
         Self {
             egui_ctx: Default::default(),
-            egui_for_winit: egui_for_winit::State::new(display.gl_window().window()),
-            painter: crate::Painter::new(display),
+            egui_for_winit: egui_for_winit::State::new(gl_window.window()),
+            painter: crate::Painter::new(gl),
         }
     }
 
@@ -153,7 +154,7 @@ impl EguiGlium {
         self.egui_for_winit.egui_input()
     }
 
-    pub fn on_event(&mut self, event: &glium::glutin::event::WindowEvent<'_>) {
+    pub fn on_event(&mut self, event: &glutin::event::WindowEvent<'_>) {
         self.egui_for_winit.on_event(event);
     }
 
@@ -162,8 +163,8 @@ impl EguiGlium {
         self.egui_for_winit.is_quit_event(event)
     }
 
-    pub fn begin_frame(&mut self, display: &glium::Display) {
-        let raw_input = self.take_raw_input(display);
+    pub fn begin_frame(&mut self, window: &glutin::window::Window) {
+        let raw_input = self.take_raw_input(window);
         self.begin_frame_with_input(raw_input);
     }
 
@@ -172,40 +173,49 @@ impl EguiGlium {
     }
 
     /// Prepare for a new frame. Normally you would call [`Self::begin_frame`] instead.
-    pub fn take_raw_input(&mut self, display: &glium::Display) -> egui::RawInput {
-        self.egui_for_winit
-            .take_egui_input(display.gl_window().window())
+    pub fn take_raw_input(&mut self, window: &glutin::window::Window) -> egui::RawInput {
+        self.egui_for_winit.take_egui_input(window)
     }
 
     /// Returns `needs_repaint` and shapes to draw.
     pub fn end_frame(
         &mut self,
-        display: &glium::Display,
+        window: &glutin::window::Window,
     ) -> (bool, Vec<egui::epaint::ClippedShape>) {
         let (egui_output, shapes) = self.egui_ctx.end_frame();
         let needs_repaint = egui_output.needs_repaint;
-        self.handle_output(display, egui_output);
+        self.handle_output(window, egui_output);
         (needs_repaint, shapes)
     }
 
-    pub fn handle_output(&mut self, display: &glium::Display, output: egui::Output) {
+    pub fn handle_output(&mut self, window: &glutin::window::Window, output: egui::Output) {
         self.egui_for_winit
-            .handle_output(display.gl_window().window(), &self.egui_ctx, output);
+            .handle_output(window, &self.egui_ctx, output);
     }
 
-    pub fn paint<T: glium::Surface>(
+    pub fn paint(
         &mut self,
-        display: &glium::Display,
-        target: &mut T,
+        gl_window: &glutin::WindowedContext<glutin::PossiblyCurrent>,
+        gl: &glow::Context,
         shapes: Vec<egui::epaint::ClippedShape>,
     ) {
         let clipped_meshes = self.egui_ctx.tessellate(shapes);
         self.painter.paint_meshes(
-            display,
-            target,
+            gl_window,
+            gl,
             self.egui_ctx.pixels_per_point(),
             clipped_meshes,
             &self.egui_ctx.texture(),
         );
+    }
+
+    #[cfg(debug_assertions)]
+    pub fn destruct(&mut self, gl: &glow::Context) {
+        self.painter.destruct(gl)
+    }
+
+    #[cfg(not(debug_assertions))]
+    pub fn destruct(&self, gl: &glow::Context) {
+        self.painter.destruct(gl)
     }
 }

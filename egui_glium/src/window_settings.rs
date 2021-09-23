@@ -15,18 +15,12 @@ impl WindowSettings {
         crate::persistence::read_ron(settings_ron_path)
     }
 
-    pub fn from_display(display: &glium::Display) -> Self {
-        let scale_factor = display.gl_window().window().scale_factor();
-        let inner_size_points = display
-            .gl_window()
-            .window()
-            .inner_size()
-            .to_logical::<f32>(scale_factor);
+    pub fn from_window(window: &glutin::window::Window) -> Self {
+        let scale_factor = window.scale_factor();
+        let inner_size_points = window.inner_size().to_logical::<f32>(scale_factor);
 
         Self {
-            pos: display
-                .gl_window()
-                .window()
+            pos: window
                 .outer_position()
                 .ok()
                 .map(|p| egui::pos2(p.x as f32, p.y as f32)),

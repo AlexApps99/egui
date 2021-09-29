@@ -1,7 +1,7 @@
 use crate::{window_settings::WindowSettings, *};
 use egui::Color32;
 #[cfg(target_os = "windows")]
-use glium::glutin::platform::windows::WindowBuilderExtWindows;
+use glutin::platform::windows::WindowBuilderExtWindows;
 use std::time::Instant;
 
 #[cfg(feature = "persistence")]
@@ -74,13 +74,17 @@ fn window_builder_drag_and_drop(
     window_builder
 }
 
+#[allow(unsafe_code)]
 fn create_display(
     app: &dyn epi::App,
     native_options: &epi::NativeOptions,
     window_settings: &Option<WindowSettings>,
     window_icon: Option<glutin::window::Icon>,
     event_loop: &glutin::event_loop::EventLoop<RequestRepaintEvent>,
-) -> glium::Display {
+) -> (
+    glutin::WindowedContext<glutin::PossiblyCurrent>,
+    glow::Context,
+) {
     let mut window_builder = glutin::window::WindowBuilder::new()
         .with_always_on_top(native_options.always_on_top)
         .with_maximized(native_options.maximized)
@@ -104,13 +108,26 @@ fn create_display(
         });
     }
 
-    let context_builder = glutin::ContextBuilder::new()
-        .with_depth_buffer(0)
-        .with_srgb(true)
-        .with_stencil_buffer(0)
-        .with_vsync(true);
+    let gl_window = unsafe {
+        glutin::ContextBuilder::new()
+            .with_depth_buffer(0)
+            .with_srgb(true)
+            .with_stencil_buffer(0)
+            .with_vsync(true)
+            .build_windowed(window_builder, event_loop)
+            .unwrap()
+            .make_current()
+            .unwrap()
+    };
 
-    glium::Display::new(window_builder, context_builder, event_loop).unwrap()
+    let gl = unsafe { glow::Context::from_loader_function(|s| gl_window.get_proc_address(s)) };
+
+    unsafe {
+        use glow::HasContext;
+        gl.enable(glow::FRAMEBUFFER_SRGB);
+    }
+
+    (gl_window, gl)
 }
 
 #[cfg(not(feature = "persistence"))]
@@ -141,7 +158,7 @@ fn create_storage(app_name: &str) -> Option<Box<dyn epi::Storage>> {
 }
 
 fn integration_info(
-    display: &glium::Display,
+    window: &glutin::window::Window,
     previous_frame_time: Option<f32>,
 ) -> epi::IntegrationInfo {
     epi::IntegrationInfo {
@@ -149,7 +166,7 @@ fn integration_info(
         prefer_dark_mode: None, // TODO: figure out system default
         cpu_usage: previous_frame_time,
         seconds_since_midnight: seconds_since_midnight(),
-        native_pixels_per_point: Some(native_pixels_per_point(display)),
+        native_pixels_per_point: Some(native_pixels_per_point(window)),
     }
 }
 
@@ -160,6 +177,7 @@ fn load_icon(icon_data: epi::IconData) -> Option<glutin::window::Icon> {
 // ----------------------------------------------------------------------------
 
 /// Run an egui app
+#[allow(unsafe_code)]
 pub fn run(mut app: Box<dyn epi::App>, native_options: &epi::NativeOptions) {
     #[allow(unused_mut)]
     let mut storage = create_storage(app.name());
@@ -167,20 +185,21 @@ pub fn run(mut app: Box<dyn epi::App>, native_options: &epi::NativeOptions) {
     let window_settings = deserialize_window_settings(&storage);
     let mut event_loop = glutin::event_loop::EventLoop::with_user_event();
     let icon = native_options.icon_data.clone().and_then(load_icon);
-    let display = create_display(&*app, native_options, &window_settings, icon, &event_loop);
+    let (gl_window, gl) =
+        create_display(&*app, native_options, &window_settings, icon, &event_loop);
 
     let repaint_signal = std::sync::Arc::new(GliumRepaintSignal(std::sync::Mutex::new(
         event_loop.create_proxy(),
     )));
 
-    let mut egui = EguiGlium::new(&display);
+    let mut egui = EguiGlium::new(&gl_window, &gl);
     *egui.ctx().memory() = deserialize_memory(&storage).unwrap_or_default();
 
     {
         let (ctx, painter) = egui.ctx_and_painter_mut();
         let mut app_output = epi::backend::AppOutput::default();
         let mut frame = epi::backend::FrameBuilder {
-            info: integration_info(&display, None),
+            info: integration_info(gl_window.window(), None),
             tex_allocator: painter,
             output: &mut app_output,
             repaint_signal: repaint_signal.clone(),
@@ -198,11 +217,11 @@ pub fn run(mut app: Box<dyn epi::App>, native_options: &epi::NativeOptions) {
         let saved_memory = egui.ctx().memory().clone();
         egui.ctx().memory().set_everything_is_visible(true);
 
-        egui.begin_frame(&display);
+        egui.begin_frame(gl_window.window());
         let (ctx, painter) = egui.ctx_and_painter_mut();
         let mut app_output = epi::backend::AppOutput::default();
         let mut frame = epi::backend::FrameBuilder {
-            info: integration_info(&display, None),
+            info: integration_info(gl_window.window(), None),
             tex_allocator: painter,
             output: &mut app_output,
             repaint_signal: repaint_signal.clone(),
@@ -211,7 +230,7 @@ pub fn run(mut app: Box<dyn epi::App>, native_options: &epi::NativeOptions) {
 
         app.update(ctx, &mut frame);
 
-        let _ = egui.end_frame(&display);
+        let _ = egui.end_frame(gl_window.window());
 
         *egui.ctx().memory() = saved_memory; // We don't want to remember that windows were huge.
         egui.ctx().clear_animations();
@@ -225,9 +244,9 @@ pub fn run(mut app: Box<dyn epi::App>, native_options: &epi::NativeOptions) {
     let mut repaint_asap = true;
 
     while running {
-        use glium::glutin::platform::run_return::EventLoopExtRunReturn as _;
+        use glutin::platform::run_return::EventLoopExtRunReturn as _;
         event_loop.run_return(|event, _, control_flow| {
-            use glium::glutin::event_loop::ControlFlow;
+            use glutin::event_loop::ControlFlow;
 
             *control_flow = ControlFlow::Wait;
 
@@ -260,6 +279,10 @@ pub fn run(mut app: Box<dyn epi::App>, native_options: &epi::NativeOptions) {
                         running = false;
                     }
 
+                    if let glutin::event::WindowEvent::Resized(physical_size) = event {
+                        gl_window.resize(physical_size);
+                    }
+
                     if let glutin::event::WindowEvent::Focused(new_focused) = event {
                         is_focused = new_focused;
                     }
@@ -267,11 +290,11 @@ pub fn run(mut app: Box<dyn epi::App>, native_options: &epi::NativeOptions) {
                     egui.on_event(&event);
 
                     // TODO: ask egui if the events warrants a repaint instead of repainting on each event.
-                    display.gl_window().window().request_redraw();
+                    gl_window.window().request_redraw();
                     repaint_asap = true;
                 }
                 glutin::event::Event::UserEvent(RequestRepaintEvent) => {
-                    display.gl_window().window().request_redraw();
+                    gl_window.window().request_redraw();
                     *control_flow = ControlFlow::Exit; // Time to redraw
                 }
 
@@ -293,34 +316,37 @@ pub fn run(mut app: Box<dyn epi::App>, native_options: &epi::NativeOptions) {
 
             let frame_start = std::time::Instant::now();
 
-            egui.begin_frame(&display);
+            egui.begin_frame(gl_window.window());
             let (ctx, painter) = egui.ctx_and_painter_mut();
             let mut app_output = epi::backend::AppOutput::default();
             let mut frame = epi::backend::FrameBuilder {
-                info: integration_info(&display, previous_frame_time),
+                info: integration_info(gl_window.window(), previous_frame_time),
                 tex_allocator: painter,
                 output: &mut app_output,
                 repaint_signal: repaint_signal.clone(),
             }
             .build();
             app.update(ctx, &mut frame);
-            let (needs_repaint, shapes) = egui.end_frame(&display);
+            let (needs_repaint, shapes) = egui.end_frame(gl_window.window());
 
             let frame_time = (Instant::now() - frame_start).as_secs_f64() as f32;
             previous_frame_time = Some(frame_time);
 
             {
-                use glium::Surface as _;
-                let mut target = display.draw();
                 let clear_color = app.clear_color();
-                target.clear_color(
-                    clear_color[0],
-                    clear_color[1],
-                    clear_color[2],
-                    clear_color[3],
-                );
-                egui.paint(&display, &mut target, shapes);
-                target.finish().unwrap();
+                unsafe {
+                    use glow::HasContext;
+                    gl.disable(glow::SCISSOR_TEST);
+                    gl.clear_color(
+                        clear_color[0],
+                        clear_color[1],
+                        clear_color[2],
+                        clear_color[3],
+                    );
+                    gl.clear(glow::COLOR_BUFFER_BIT);
+                }
+                egui.paint(&gl_window, &gl, shapes);
+                gl_window.swap_buffers().unwrap();
             }
 
             {
@@ -332,27 +358,27 @@ pub fn run(mut app: Box<dyn epi::App>, native_options: &epi::NativeOptions) {
                 } = app_output;
 
                 if let Some(decorated) = decorated {
-                    display.gl_window().window().set_decorations(decorated);
+                    gl_window.window().set_decorations(decorated);
                 }
 
                 if let Some(window_size) = window_size {
-                    display.gl_window().window().set_inner_size(
+                    gl_window.window().set_inner_size(
                         glutin::dpi::PhysicalSize {
                             width: (egui.ctx().pixels_per_point() * window_size.x).round(),
                             height: (egui.ctx().pixels_per_point() * window_size.y).round(),
                         }
-                        .to_logical::<f32>(native_pixels_per_point(&display) as f64),
+                        .to_logical::<f32>(native_pixels_per_point(gl_window.window()) as f64),
                     );
                 }
 
                 if drag_window {
-                    let _ = display.gl_window().window().drag_window();
+                    let _ = gl_window.window().drag_window();
                 }
 
                 if quit {
                     running = false;
                 } else if needs_repaint {
-                    display.gl_window().window().request_redraw();
+                    gl_window.window().request_redraw();
                     repaint_asap = true;
                 };
             }
@@ -364,7 +390,7 @@ pub fn run(mut app: Box<dyn epi::App>, native_options: &epi::NativeOptions) {
                     epi::set_value(
                         storage.as_mut(),
                         WINDOW_KEY,
-                        &WindowSettings::from_display(&display),
+                        &WindowSettings::from_window(gl_window.window()),
                     );
                     epi::set_value(storage.as_mut(), EGUI_MEMORY_KEY, &*egui.ctx().memory());
                     app.save(storage.as_mut());
@@ -382,10 +408,12 @@ pub fn run(mut app: Box<dyn epi::App>, native_options: &epi::NativeOptions) {
         epi::set_value(
             storage.as_mut(),
             WINDOW_KEY,
-            &WindowSettings::from_display(&display),
+            &WindowSettings::from_window(gl_window.window()),
         );
         epi::set_value(storage.as_mut(), EGUI_MEMORY_KEY, &*egui.ctx().memory());
         app.save(storage.as_mut());
         storage.flush();
     }
+
+    egui.destruct(&gl);
 }

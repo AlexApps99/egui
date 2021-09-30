@@ -216,12 +216,12 @@ impl EguiGlium {
     }
 
     #[cfg(debug_assertions)]
-    pub fn destruct(&mut self, gl: &glow::Context) {
-        self.painter.destruct(gl)
+    pub fn destroy(&mut self, gl: &glow::Context) {
+        self.painter.destroy(gl)
     }
 
     #[cfg(not(debug_assertions))]
-    pub fn destruct(&self, gl: &glow::Context) {
-        self.painter.destruct(gl)
+    pub fn destroy(&self, gl: &glow::Context) {
+        self.painter.destroy(gl)
     }
 }

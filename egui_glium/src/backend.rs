@@ -415,5 +415,5 @@ pub fn run(mut app: Box<dyn epi::App>, native_options: &epi::NativeOptions) {
         storage.flush();
     }
 
-    egui.destruct(&gl);
+    egui.destroy(&gl);
 }

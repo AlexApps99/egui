@@ -4,6 +4,7 @@ use egui::{
     emath::Rect,
     epaint::{Color32, Mesh, Vertex},
 };
+use memoffset::offset_of;
 
 use std::convert::TryInto;
 
@@ -68,22 +69,23 @@ pub struct Painter {
     /// `None` means unallocated (freed) slot.
     user_textures: Vec<Option<UserTexture>>,
 
-    va: glow::NativeVertexArray,
-    vb: glow::NativeBuffer,
-    eb: glow::NativeBuffer,
+    vertex_array: glow::NativeVertexArray,
+    vertex_buffer: glow::NativeBuffer,
+    element_array_buffer: glow::NativeBuffer,
 
+    // Stores outdated OpenGL textures that are yet to be deleted
     old_textures: Vec<glow::NativeTexture>,
-    // Only in debug builds, to make sure egui is used correctly
+    // Only in debug builds, to make sure we are destroyed correctly.
     #[cfg(debug_assertions)]
-    destructed: bool,
+    destroyed: bool,
 }
 
 #[derive(Default)]
 struct UserTexture {
     /// Pending upload (will be emptied later).
     /// This is the format glow likes.
-    pixels: Vec<u8>,
-    pixels_res: (usize, usize),
+    data: Vec<u8>,
+    size: (usize, usize),
 
     /// Lazily uploaded
     gl_texture: Option<glow::NativeTexture>,
@@ -176,14 +178,12 @@ impl Painter {
             let u_screen_size = gl.get_uniform_location(program, "u_screen_size").unwrap();
             let u_sampler = gl.get_uniform_location(program, "u_sampler").unwrap();
 
-            let va = gl.create_vertex_array().unwrap();
-            let vb = gl.create_buffer().unwrap();
-            let eb = gl.create_buffer().unwrap();
+            let vertex_array = gl.create_vertex_array().unwrap();
+            let vertex_buffer = gl.create_buffer().unwrap();
+            let element_array_buffer = gl.create_buffer().unwrap();
 
-            debug_assert_eq!(std::mem::size_of::<Vertex>(), 20);
-
-            gl.bind_vertex_array(Some(va));
-            gl.bind_buffer(glow::ARRAY_BUFFER, Some(vb));
+            gl.bind_vertex_array(Some(vertex_array));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
 
             let a_pos_loc = gl.get_attrib_location(program, "a_pos").unwrap();
             let a_tc_loc = gl.get_attrib_location(program, "a_tc").unwrap();
@@ -195,7 +195,7 @@ impl Painter {
                 glow::FLOAT,
                 false,
                 std::mem::size_of::<Vertex>() as i32,
-                0,
+                offset_of!(Vertex, pos) as i32,
             );
             gl.enable_vertex_attrib_array(a_pos_loc);
 
@@ -205,7 +205,7 @@ impl Painter {
                 glow::FLOAT,
                 false,
                 std::mem::size_of::<Vertex>() as i32,
-                2 * std::mem::size_of::<f32>() as i32,
+                offset_of!(Vertex, uv) as i32,
             );
             gl.enable_vertex_attrib_array(a_tc_loc);
 
@@ -215,7 +215,7 @@ impl Painter {
                 glow::UNSIGNED_BYTE,
                 false,
                 std::mem::size_of::<Vertex>() as i32,
-                4 * std::mem::size_of::<f32>() as i32,
+                offset_of!(Vertex, color) as i32,
             );
             gl.enable_vertex_attrib_array(a_srgba_loc);
             assert_eq!(gl.get_error(), glow::NO_ERROR);
@@ -227,21 +227,18 @@ impl Painter {
                 egui_texture: None,
                 egui_texture_version: None,
                 user_textures: Default::default(),
-                va,
-                vb,
-                eb,
+                vertex_array,
+                vertex_buffer,
+                element_array_buffer,
                 old_textures: Vec::new(),
                 #[cfg(debug_assertions)]
-                destructed: false,
+                destroyed: false,
             }
         }
     }
 
     pub fn upload_egui_texture(&mut self, gl: &glow::Context, texture: &egui::Texture) {
-        #[cfg(debug_assertions)]
-        if self.destructed {
-            unreachable!();
-        }
+        debug_assert!(!self.destroyed, "egui has already been destroyed!");
 
         if self.egui_texture_version == Some(texture.version) {
             return; // No change
@@ -303,9 +300,9 @@ impl Painter {
         gl.uniform_1_i32(Some(&self.u_sampler), 0);
         gl.active_texture(glow::TEXTURE0);
 
-        gl.bind_vertex_array(Some(self.va));
-        gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vb));
-        gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.eb));
+        gl.bind_vertex_array(Some(self.vertex_array));
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
+        gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.element_array_buffer));
         (width_in_pixels, height_in_pixels)
     }
 
@@ -334,20 +331,17 @@ impl Painter {
         gl_window: &glutin::WindowedContext<glutin::PossiblyCurrent>,
         gl: &glow::Context,
         pixels_per_point: f32,
-        cipped_meshes: Vec<egui::ClippedMesh>,
+        clipped_meshes: Vec<egui::ClippedMesh>,
         egui_texture: &egui::Texture,
     ) {
-        #[cfg(debug_assertions)]
-        if self.destructed {
-            unreachable!();
-        }
+        debug_assert!(!self.destroyed, "egui has already been destroyed!");
 
         self.upload_egui_texture(gl, egui_texture);
         self.upload_pending_user_textures(gl);
 
-        let (w, h) = unsafe { self.prepare_painting(gl_window, gl, pixels_per_point) };
-        for egui::ClippedMesh(clip_rect, mesh) in cipped_meshes {
-            self.paint_mesh(gl, w, h, pixels_per_point, clip_rect, &mesh)
+        let size_in_pixels = unsafe { self.prepare_painting(gl_window, gl, pixels_per_point) };
+        for egui::ClippedMesh(clip_rect, mesh) in clipped_meshes {
+            self.paint_mesh(gl, size_in_pixels, pixels_per_point, clip_rect, &mesh)
         }
 
         assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
@@ -357,8 +351,7 @@ impl Painter {
     fn paint_mesh(
         &mut self,
         gl: &glow::Context,
-        width_in_pixels: u32,
-        height_in_pixels: u32,
+        size_in_pixels: (u32, u32),
         pixels_per_point: f32,
         clip_rect: Rect,
         mesh: &Mesh,
@@ -388,10 +381,10 @@ impl Painter {
             let clip_max_y = pixels_per_point * clip_rect.max.y;
 
             // Make sure clip rect can fit within a `u32`:
-            let clip_min_x = clip_min_x.clamp(0.0, width_in_pixels as f32);
-            let clip_min_y = clip_min_y.clamp(0.0, height_in_pixels as f32);
-            let clip_max_x = clip_max_x.clamp(clip_min_x, width_in_pixels as f32);
-            let clip_max_y = clip_max_y.clamp(clip_min_y, height_in_pixels as f32);
+            let clip_min_x = clip_min_x.clamp(0.0, size_in_pixels.0 as f32);
+            let clip_min_y = clip_min_y.clamp(0.0, size_in_pixels.1 as f32);
+            let clip_max_x = clip_max_x.clamp(clip_min_x, size_in_pixels.0 as f32);
+            let clip_max_y = clip_max_y.clamp(clip_min_y, size_in_pixels.1 as f32);
 
             let clip_min_x = clip_min_x.round() as i32;
             let clip_min_y = clip_min_y.round() as i32;
@@ -401,7 +394,7 @@ impl Painter {
             unsafe {
                 gl.scissor(
                     clip_min_x,
-                    height_in_pixels as i32 - clip_max_y,
+                    size_in_pixels.1 as i32 - clip_max_y,
                     clip_max_x - clip_min_x,
                     clip_max_y - clip_min_y,
                 );
@@ -420,10 +413,7 @@ impl Painter {
     // No need to implement this in your egui integration!
 
     pub fn alloc_user_texture(&mut self) -> egui::TextureId {
-        #[cfg(debug_assertions)]
-        if self.destructed {
-            unreachable!();
-        }
+        debug_assert!(!self.destroyed, "egui has already been destroyed!");
 
         for (i, tex) in self.user_textures.iter_mut().enumerate() {
             if tex.is_none() {
@@ -439,10 +429,7 @@ impl Painter {
     /// register glow texture as egui texture
     /// Usable for render to image rectangle
     pub fn register_glow_texture(&mut self, texture: glow::NativeTexture) -> egui::TextureId {
-        #[cfg(debug_assertions)]
-        if self.destructed {
-            unreachable!();
-        }
+        debug_assert!(!self.destroyed, "egui has already been destroyed!");
 
         let id = self.alloc_user_texture();
         if let egui::TextureId::User(id) = id {
@@ -453,8 +440,8 @@ impl Painter {
                 } = std::mem::replace(
                     user_texture,
                     UserTexture {
-                        pixels: vec![],
-                        pixels_res: (0, 0),
+                        data: vec![],
+                        size: (0, 0),
                         gl_texture: Some(texture),
                     },
                 ) {
@@ -471,10 +458,7 @@ impl Painter {
         size: (usize, usize),
         pixels: &[Color32],
     ) {
-        #[cfg(debug_assertions)]
-        if self.destructed {
-            unreachable!();
-        }
+        debug_assert!(!self.destroyed, "egui has already been destroyed!");
 
         assert_eq!(
             size.0 * size.1,
@@ -484,7 +468,7 @@ impl Painter {
 
         if let egui::TextureId::User(id) = id {
             if let Some(Some(user_texture)) = self.user_textures.get_mut(id as usize) {
-                let pixels: Vec<u8> = pixels
+                let data: Vec<u8> = pixels
                     .iter()
                     .flat_map(|srgba| Vec::from(srgba.to_array()))
                     .collect();
@@ -495,8 +479,8 @@ impl Painter {
                 } = std::mem::replace(
                     user_texture,
                     UserTexture {
-                        pixels,
-                        pixels_res: size,
+                        data,
+                        size,
                         gl_texture: None,
                     },
                 ) {
@@ -507,10 +491,7 @@ impl Painter {
     }
 
     pub fn free_user_texture(&mut self, id: egui::TextureId) {
-        #[cfg(debug_assertions)]
-        if self.destructed {
-            unreachable!();
-        }
+        debug_assert!(!self.destroyed, "egui has already been destroyed!");
 
         if let egui::TextureId::User(id) = id {
             let index = id as usize;
@@ -521,10 +502,7 @@ impl Painter {
     }
 
     pub fn get_texture(&self, texture_id: egui::TextureId) -> Option<glow::NativeTexture> {
-        #[cfg(debug_assertions)]
-        if self.destructed {
-            unreachable!();
-        }
+        debug_assert!(!self.destroyed, "egui has already been destroyed!");
 
         match texture_id {
             egui::TextureId::Egui => self.egui_texture,
@@ -533,21 +511,18 @@ impl Painter {
     }
 
     pub fn upload_pending_user_textures(&mut self, gl: &glow::Context) {
-        #[cfg(debug_assertions)]
-        if self.destructed {
-            unreachable!();
-        }
+        debug_assert!(!self.destroyed, "egui has already been destroyed!");
 
         for user_texture in self.user_textures.iter_mut().flatten() {
             if user_texture.gl_texture.is_none() {
-                let pixels = std::mem::take(&mut user_texture.pixels);
+                let data = std::mem::take(&mut user_texture.data);
                 user_texture.gl_texture = Some(srgbtexture2d(
                     gl,
-                    &pixels,
-                    user_texture.pixels_res.0,
-                    user_texture.pixels_res.1,
+                    &data,
+                    user_texture.size.0,
+                    user_texture.size.1,
                 ));
-                user_texture.pixels_res = (0, 0);
+                user_texture.size = (0, 0);
             }
         }
         for t in self.old_textures.drain(..) {
@@ -557,7 +532,7 @@ impl Painter {
         }
     }
 
-    unsafe fn destruct_gl(&self, gl: &glow::Context) {
+    unsafe fn destroy_gl(&self, gl: &glow::Context) {
         gl.delete_program(self.program);
         if let Some(tex) = self.egui_texture {
             gl.delete_texture(tex);
@@ -567,9 +542,9 @@ impl Painter {
                 gl.delete_texture(t);
             }
         }
-        gl.delete_vertex_array(self.va);
-        gl.delete_buffer(self.vb);
-        gl.delete_buffer(self.eb);
+        gl.delete_vertex_array(self.vertex_array);
+        gl.delete_buffer(self.vertex_buffer);
+        gl.delete_buffer(self.element_array_buffer);
         for t in &self.old_textures {
             gl.delete_texture(*t);
         }
@@ -577,32 +552,28 @@ impl Painter {
 
     /// This function must be called before Painter is dropped, as Painter has some OpenGL objects
     /// that should be deleted.
-
     #[cfg(debug_assertions)]
-    pub fn destruct(&mut self, gl: &glow::Context) {
+    pub fn destroy(&mut self, gl: &glow::Context) {
+        debug_assert!(!self.destroyed, "Only destroy egui once!");
         unsafe {
-            self.destruct_gl(gl);
+            self.destroy_gl(gl);
         }
-        #[cfg(debug_assertions)]
-        {
-            self.destructed = true;
-        }
+        self.destroyed = true;
     }
 
     #[cfg(not(debug_assertions))]
-    pub fn destruct(&self, gl: &glow::Context) {
+    pub fn destroy(&self, gl: &glow::Context) {
         unsafe {
-            self.destruct_gl(gl);
+            self.destroy_gl(gl);
         }
     }
 }
 
 impl Drop for Painter {
     fn drop(&mut self) {
-        #[cfg(debug_assertions)]
         debug_assert!(
-            self.destructed,
-            "Make sure to destruct() rather than dropping, to avoid leaking OpenGL objects!"
+            self.destroyed,
+            "Make sure to destroy() rather than dropping, to avoid leaking OpenGL objects!"
         );
     }
 }

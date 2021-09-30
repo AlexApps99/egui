@@ -27,6 +27,7 @@ egui-winit = { version = "0.14.0", path = "../egui-winit", default-features = fa
 epi = { version = "0.14.0", path = "../epi" }
 glutin = "0.27"
 glow = "0.11"
+memoffset = "0.6"
 
 # feature "persistence":
 directories-next = { version = "2", optional = true }

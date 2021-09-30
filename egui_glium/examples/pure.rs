@@ -1,4 +1,5 @@
 //! Example how to use pure `egui_glium` without [`epi`].
+
 fn create_display(
     event_loop: &glutin::event_loop::EventLoop<()>,
 ) -> (
@@ -88,7 +89,13 @@ fn main() {
                     );
                     gl.clear(glow::COLOR_BUFFER_BIT);
                 }
+
+                // draw things behind egui here
+
                 egui.paint(&gl_window, &gl, shapes);
+
+                // draw things on top of egui here
+
                 gl_window.swap_buffers().unwrap();
             }
         };
@@ -114,7 +121,7 @@ fn main() {
                 gl_window.window().request_redraw(); // TODO: ask egui if the events warrants a repaint instead
             }
             glutin::event::Event::LoopDestroyed => {
-                egui.destruct(&gl);
+                egui.destroy(&gl);
             }
 
             _ => (),

@@ -139,8 +139,10 @@ impl ShaderVersion {
 impl Painter {
     pub fn new(gl: &glow::Context) -> Painter {
         let header = ShaderVersion::get(gl).version();
-        let v_src = header.to_owned() + VERT_SRC;
-        let f_src = header.to_owned() + FRAG_SRC;
+        let mut v_src = header.to_owned();
+        v_src.push_str(VERT_SRC);
+        let mut f_src = header.to_owned();
+        f_src.push_str(FRAG_SRC);
         // TODO error handling
         unsafe {
             let v = gl.create_shader(glow::VERTEX_SHADER).unwrap();
@@ -238,7 +240,7 @@ impl Painter {
     }
 
     pub fn upload_egui_texture(&mut self, gl: &glow::Context, texture: &egui::Texture) {
-        debug_assert!(!self.destroyed, "egui has already been destroyed!");
+        self.assert_destroyed();
 
         if self.egui_texture_version == Some(texture.version) {
             return; // No change
@@ -334,7 +336,7 @@ impl Painter {
         clipped_meshes: Vec<egui::ClippedMesh>,
         egui_texture: &egui::Texture,
     ) {
-        debug_assert!(!self.destroyed, "egui has already been destroyed!");
+        self.assert_destroyed();
 
         self.upload_egui_texture(gl, egui_texture);
         self.upload_pending_user_textures(gl);
@@ -413,7 +415,7 @@ impl Painter {
     // No need to implement this in your egui integration!
 
     pub fn alloc_user_texture(&mut self) -> egui::TextureId {
-        debug_assert!(!self.destroyed, "egui has already been destroyed!");
+        self.assert_destroyed();
 
         for (i, tex) in self.user_textures.iter_mut().enumerate() {
             if tex.is_none() {
@@ -429,7 +431,7 @@ impl Painter {
     /// register glow texture as egui texture
     /// Usable for render to image rectangle
     pub fn register_glow_texture(&mut self, texture: glow::NativeTexture) -> egui::TextureId {
-        debug_assert!(!self.destroyed, "egui has already been destroyed!");
+        self.assert_destroyed();
 
         let id = self.alloc_user_texture();
         if let egui::TextureId::User(id) = id {
@@ -458,7 +460,7 @@ impl Painter {
         size: (usize, usize),
         pixels: &[Color32],
     ) {
-        debug_assert!(!self.destroyed, "egui has already been destroyed!");
+        self.assert_destroyed();
 
         assert_eq!(
             size.0 * size.1,
@@ -491,7 +493,7 @@ impl Painter {
     }
 
     pub fn free_user_texture(&mut self, id: egui::TextureId) {
-        debug_assert!(!self.destroyed, "egui has already been destroyed!");
+        self.assert_destroyed();
 
         if let egui::TextureId::User(id) = id {
             let index = id as usize;
@@ -502,7 +504,7 @@ impl Painter {
     }
 
     pub fn get_texture(&self, texture_id: egui::TextureId) -> Option<glow::NativeTexture> {
-        debug_assert!(!self.destroyed, "egui has already been destroyed!");
+        self.assert_destroyed();
 
         match texture_id {
             egui::TextureId::Egui => self.egui_texture,
@@ -511,7 +513,7 @@ impl Painter {
     }
 
     pub fn upload_pending_user_textures(&mut self, gl: &glow::Context) {
-        debug_assert!(!self.destroyed, "egui has already been destroyed!");
+        self.assert_destroyed();
 
         for user_texture in self.user_textures.iter_mut().flatten() {
             if user_texture.gl_texture.is_none() {
@@ -567,11 +569,22 @@ impl Painter {
             self.destroy_gl(gl);
         }
     }
+
+    #[cfg(debug_assertions)]
+    fn assert_destroyed(&self) {
+        assert!(!self.destroyed, "egui has already been destroyed!");
+    }
+
+    #[inline(always)]
+    #[cfg(not(debug_assertions))]
+    #[allow(clippy::unused_self)]
+    fn assert_destroyed(&self) {}
 }
 
 impl Drop for Painter {
     fn drop(&mut self) {
-        debug_assert!(
+        #[cfg(debug_assertions)]
+        assert!(
             self.destroyed,
             "Make sure to destroy() rather than dropping, to avoid leaking OpenGL objects!"
         );

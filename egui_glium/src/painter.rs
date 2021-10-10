@@ -91,7 +91,7 @@ struct UserTexture {
     gl_texture: Option<glow::NativeTexture>,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
 pub enum ShaderVersion {
     Gl120,
@@ -102,9 +102,13 @@ pub enum ShaderVersion {
 
 impl ShaderVersion {
     fn get(gl: &glow::Context) -> Self {
-        let glsl_ver = unsafe { gl.get_parameter_string(glow::SHADING_LANGUAGE_VERSION) };
+        Self::parse(unsafe { &gl.get_parameter_string(glow::SHADING_LANGUAGE_VERSION) })
+    }
+
+    #[inline]
+    fn parse(glsl_ver: &str) -> Self {
         let start = glsl_ver.find(|c| char::is_ascii_digit(&c)).unwrap();
-        let es = glsl_ver[..start].contains("ES");
+        let es = glsl_ver[..start].contains(" ES ");
         let ver = glsl_ver[start..].splitn(2, ' ').next().unwrap();
         let [maj, min]: [u8; 2] = ver
             .splitn(3, '.')
@@ -133,6 +137,24 @@ impl ShaderVersion {
             Self::Es100 => "#version 100\n",
             Self::Es300 => "#version 300 es\n",
         }
+    }
+}
+
+#[test]
+fn test_shader_version() {
+    use ShaderVersion::*;
+    for (s, v) in [
+        ("1.2 OpenGL foo bar", Gl120),
+        ("3.0", Gl140),
+        ("0.0", Gl120),
+        ("OpenGL ES GLSL 3.00 (WebGL2)", Es300),
+        ("OpenGL ES GLSL 1.00 (WebGL)", Es100),
+        ("OpenGL ES GLSL ES 1.00 foo bar", Es100),
+        ("WebGL GLSL ES 3.00 foo bar", Es300),
+        ("WebGL GLSL ES 3.00", Es300),
+        ("WebGL GLSL ES 1.0 foo bar", Es100),
+    ] {
+        assert_eq!(ShaderVersion::parse(s), v);
     }
 }
 

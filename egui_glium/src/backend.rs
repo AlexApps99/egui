@@ -47,11 +47,11 @@ impl epi::TextureAllocator for Painter {
 
 struct RequestRepaintEvent;
 
-struct GliumRepaintSignal(
+struct GlowRepaintSignal(
     std::sync::Mutex<glutin::event_loop::EventLoopProxy<RequestRepaintEvent>>,
 );
 
-impl epi::RepaintSignal for GliumRepaintSignal {
+impl epi::RepaintSignal for GlowRepaintSignal {
     fn request_repaint(&self) {
         self.0.lock().unwrap().send_event(RequestRepaintEvent).ok();
     }
@@ -188,11 +188,11 @@ pub fn run(mut app: Box<dyn epi::App>, native_options: &epi::NativeOptions) {
     let (gl_window, gl) =
         create_display(&*app, native_options, &window_settings, icon, &event_loop);
 
-    let repaint_signal = std::sync::Arc::new(GliumRepaintSignal(std::sync::Mutex::new(
+    let repaint_signal = std::sync::Arc::new(GlowRepaintSignal(std::sync::Mutex::new(
         event_loop.create_proxy(),
     )));
 
-    let mut egui = EguiGlium::new(&gl_window, &gl);
+    let mut egui = EguiGlow::new(&gl_window, &gl);
     *egui.ctx().memory() = deserialize_memory(&storage).unwrap_or_default();
 
     {

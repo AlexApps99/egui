@@ -59,6 +59,10 @@ unsafe fn as_u8_slice<T>(s: &[T]) -> &[u8] {
     std::slice::from_raw_parts(s.as_ptr().cast::<u8>(), s.len() * std::mem::size_of::<T>())
 }
 
+/// OpenGL painter
+///
+/// This struct must be destroyed with [`Painter::destroy`] before dropping, to ensure OpenGL
+/// objects have been properly deleted and are not leaked.
 pub struct Painter {
     program: glow::NativeProgram,
     u_screen_size: glow::UniformLocation,
@@ -93,7 +97,7 @@ struct UserTexture {
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
-pub enum ShaderVersion {
+enum ShaderVersion {
     Gl120,
     Gl140,
     Es100,

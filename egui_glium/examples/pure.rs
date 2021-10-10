@@ -1,4 +1,4 @@
-//! Example how to use pure `egui_glium` without [`epi`].
+//! Example how to use pure `egui_glow` without [`epi`].
 
 fn create_display(
     event_loop: &glutin::event_loop::EventLoop<()>,
@@ -12,7 +12,7 @@ fn create_display(
             width: 800.0,
             height: 600.0,
         })
-        .with_title("egui_glium example");
+        .with_title("egui_glow example");
 
     let gl_window = unsafe {
         glutin::ContextBuilder::new()
@@ -40,7 +40,7 @@ fn main() {
     let event_loop = glutin::event_loop::EventLoop::with_user_event();
     let (gl_window, gl) = create_display(&event_loop);
 
-    let mut egui = egui_glium::EguiGlium::new(&gl_window, &gl);
+    let mut egui = egui_glium::EguiGlow::new(&gl_window, &gl);
 
     event_loop.run(move |event, _, control_flow| {
         let mut redraw = || {

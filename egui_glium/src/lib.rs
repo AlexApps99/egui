@@ -1,6 +1,6 @@
-//! [`egui`] bindings for [`glium`](https://github.com/glium/glium).
+//! [`egui`] bindings for [`glow`](https://github.com/grovesNL/glow).
 //!
-//! The main type you want to use is [`EguiGlium`].
+//! The main type you want to use is [`EguiGlow`].
 //!
 //! This library is an [`epi`] backend.
 //! If you are writing an app, you may want to look at [`eframe`](https://docs.rs/eframe) instead.
@@ -115,14 +115,14 @@ pub fn native_pixels_per_point(window: &glutin::window::Window) -> f32 {
 
 // ----------------------------------------------------------------------------
 
-/// Use [`egui`] from a [`glium`] app.
-pub struct EguiGlium {
+/// Use [`egui`] from a [`glow`] app.
+pub struct EguiGlow {
     egui_ctx: egui::CtxRef,
     egui_winit: egui_winit::State,
     painter: crate::Painter,
 }
 
-impl EguiGlium {
+impl EguiGlow {
     pub fn new(
         gl_window: &glutin::WindowedContext<glutin::PossiblyCurrent>,
         gl: &glow::Context,

@@ -1,7 +1,7 @@
 use egui::*;
 
-#[cfg_attr(feature = "persistence", derive(serde::Deserialize, serde::Serialize))]
-#[cfg_attr(feature = "persistence", serde(default))]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct Painting {
     /// in 0-1 normalized coordinates
     lines: Vec<Vec<Pos2>>,
@@ -75,7 +75,7 @@ impl super::Demo for Painting {
     }
 
     fn show(&mut self, ctx: &CtxRef, open: &mut bool) {
-        use super::View;
+        use super::View as _;
         Window::new(self.name())
             .open(open)
             .default_size(vec2(512.0, 512.0))

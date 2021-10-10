@@ -109,7 +109,7 @@ pub const WHITE_UV: emath::Pos2 = emath::pos2(0.0, 0.0);
 
 /// What texture to use in a [`Mesh`] mesh.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "persistence", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub enum TextureId {
     /// The egui font texture.
     /// If you don't want to use a texture, pick this and the [`WHITE_UV`] for uv-coord.
@@ -142,7 +142,7 @@ pub struct ClippedShape(
 ///
 /// Everything is using logical points.
 #[derive(Clone, Debug)]
-#[cfg_attr(feature = "persistence", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct ClippedMesh(
     /// Clip / scissor rectangle.
     /// Only show the part of the [`Mesh`] that falls within this.
@@ -157,7 +157,7 @@ pub struct ClippedMesh(
 /// or with the `debug_egui_assert` feature in debug builds.
 #[macro_export]
 macro_rules! epaint_assert {
-    ($($arg:tt)*) => {
+    ($($arg: tt)*) => {
         if cfg!(any(
             feature = "extra_asserts",
             all(feature = "extra_debug_asserts", debug_assertions),

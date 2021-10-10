@@ -8,7 +8,7 @@ impl super::Demo for CursorTest {
 
     fn show(&mut self, ctx: &egui::CtxRef, open: &mut bool) {
         egui::Window::new(self.name()).open(open).show(ctx, |ui| {
-            use super::View;
+            use super::View as _;
             self.ui(ui);
         });
     }
@@ -40,7 +40,7 @@ impl super::Demo for IdTest {
 
     fn show(&mut self, ctx: &egui::CtxRef, open: &mut bool) {
         egui::Window::new(self.name()).open(open).show(ctx, |ui| {
-            use super::View;
+            use super::View as _;
             self.ui(ui);
         });
     }
@@ -120,7 +120,7 @@ impl super::Demo for ManualLayoutTest {
             .resizable(false)
             .open(open)
             .show(ctx, |ui| {
-                use super::View;
+                use super::View as _;
                 self.ui(ui);
             });
     }
@@ -204,7 +204,7 @@ impl super::Demo for TableTest {
 
     fn show(&mut self, ctx: &egui::CtxRef, open: &mut bool) {
         egui::Window::new(self.name()).open(open).show(ctx, |ui| {
-            use super::View;
+            use super::View as _;
             self.ui(ui);
         });
     }
@@ -303,7 +303,7 @@ impl super::View for TableTest {
 
 // ----------------------------------------------------------------------------
 
-#[cfg_attr(feature = "persistence", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 #[derive(Default)]
 pub struct InputTest {
     info: String,
@@ -319,7 +319,7 @@ impl super::Demo for InputTest {
             .open(open)
             .resizable(false)
             .show(ctx, |ui| {
-                use super::View;
+                use super::View as _;
                 self.ui(ui);
             });
     }

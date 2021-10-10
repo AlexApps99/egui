@@ -1,7 +1,7 @@
 use egui::*;
 
-#[cfg_attr(feature = "persistence", derive(serde::Deserialize, serde::Serialize))]
-#[cfg_attr(feature = "persistence", serde(default))]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct LayoutTest {
     // Identical to contents of `egui::Layout`
     layout: LayoutSettings,
@@ -22,8 +22,8 @@ impl Default for LayoutTest {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-#[cfg_attr(feature = "persistence", derive(serde::Deserialize, serde::Serialize))]
-#[cfg_attr(feature = "persistence", serde(default))]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct LayoutSettings {
     // Similar to the contents of `egui::Layout`
     main_dir: Direction,
@@ -81,7 +81,7 @@ impl super::Demo for LayoutTest {
             .open(open)
             .resizable(false)
             .show(ctx, |ui| {
-                use super::View;
+                use super::View as _;
                 self.ui(ui);
             });
     }

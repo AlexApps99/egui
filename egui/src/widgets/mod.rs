@@ -81,12 +81,16 @@ where
 /// Show a button to reset a value to its default.
 /// The button is only enabled if the value does not already have its original value.
 pub fn reset_button<T: Default + PartialEq>(ui: &mut Ui, value: &mut T) {
-    let def = T::default();
+    reset_button_with(ui, value, T::default());
+}
+/// Show a button to reset a value to its default.
+/// The button is only enabled if the value does not already have its original value.
+pub fn reset_button_with<T: PartialEq>(ui: &mut Ui, value: &mut T, reset_value: T) {
     if ui
-        .add(Button::new("Reset").enabled(*value != def))
+        .add(Button::new("Reset").enabled(*value != reset_value))
         .clicked()
     {
-        *value = def;
+        *value = reset_value;
     }
 }
 
@@ -120,4 +124,20 @@ pub(crate) fn shadow_ui(ui: &mut Ui, shadow: &mut epaint::Shadow, text: &str) {
         .on_hover_text("Extrusion");
         ui.color_edit_button_srgba(color);
     });
+}
+
+/// Show a small button to switch to/from dark/light mode (globally).
+pub fn global_dark_light_mode_switch(ui: &mut Ui) {
+    let style: crate::Style = (*ui.ctx().style()).clone();
+    let new_visuals = style.visuals.light_dark_small_toggle_button(ui);
+    if let Some(visuals) = new_visuals {
+        ui.ctx().set_visuals(visuals);
+    }
+}
+
+/// Show larger buttons for switching between light and dark mode (globally).
+pub fn global_dark_light_mode_buttons(ui: &mut Ui) {
+    let mut visuals = ui.ctx().style().visuals.clone();
+    visuals.light_dark_radio_buttons(ui);
+    ui.ctx().set_visuals(visuals);
 }

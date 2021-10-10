@@ -11,15 +11,21 @@ NOTE: [`eframe`](eframe/CHANGELOG.md), [`egui_web`](egui_web/CHANGELOG.md), [`eg
 * Add horizontal scrolling support to `ScrollArea` and `Window` (opt-in).
 * `TextEdit::layouter`: Add custom text layout for e.g. syntax highlighting or WYSIWYG.
 * `Fonts::layout_job*`: New text layout engine allowing mixing fonts, colors and styles, with underlining and strikethrough.
+* Add feature `"serialize"` separatedly from `"persistence"`.
+* Add `egui::widgets::global_dark_light_mode_buttons` to easily add buttons for switching the egui theme.
+* `TextEdit` can now be used to show text which can be selectedd and copied, but not edited.
+* Add `Memory::caches` for caching things from one frame to the next.
 
 ### Changed 🔧
 * Label text will now be centered, right-aligned and/or justified based on the layout.
 * `Hyperlink` will now word-wrap just like a `Label`.
 * All `Ui`:s must now have a finite `max_rect`.
   * Deprecated: `max_rect_finite`, `available_size_before_wrap_finite` and `available_rect_before_wrap_finite`.
-* `Painter`/`Fonts`: text layout now expect color when creating a `Galley`. You may override that color with `Painter::galley_with_color`.
+* `Painter`/`Fonts`: text layout now expect a color when creating a `Galley`. You may override that color with `Painter::galley_with_color`.
 * MSRV (Minimum Supported Rust Version) is now `1.54.0`.
 * By default, `DragValue`:s no longer show a tooltip when hovered. Change with `Style::explanation_tooltips`.
+* Smaller and nicer color picker.
+* `ScrollArea` will auto-shrink to content size unless told otherwise using `ScollArea::auto_shrink`.
 
 ### Fixed 🐛
 * Fix wrongly sized multiline `TextEdit` in justified layouts.

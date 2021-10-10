@@ -1,7 +1,7 @@
 /// All the different demo apps.
 #[derive(Default)]
-#[cfg_attr(feature = "persistence", derive(serde::Deserialize, serde::Serialize))]
-#[cfg_attr(feature = "persistence", serde(default))]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct Apps {
     demo: crate::apps::DemoApp,
     easy_mark_editor: crate::easy_mark::EasyMarkEditor,
@@ -27,13 +27,13 @@ impl Apps {
 
 /// Wraps many demo/test apps into one.
 #[derive(Default)]
-#[cfg_attr(feature = "persistence", derive(serde::Deserialize, serde::Serialize))]
-#[cfg_attr(feature = "persistence", serde(default))]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", serde(default))]
 pub struct WrapApp {
     selected_anchor: String,
     apps: Apps,
     backend_panel: super::backend_panel::BackendPanel,
-    #[cfg_attr(feature = "persistence", serde(skip))]
+    #[cfg_attr(feature = "serde", serde(skip))]
     dropped_files: Vec<egui::DroppedFile>,
 }
 
@@ -42,15 +42,14 @@ impl epi::App for WrapApp {
         "egui demo apps"
     }
 
-    #[allow(unused_variables)]
     fn setup(
         &mut self,
         _ctx: &egui::CtxRef,
         _frame: &mut epi::Frame<'_>,
-        storage: Option<&dyn epi::Storage>,
+        _storage: Option<&dyn epi::Storage>,
     ) {
         #[cfg(feature = "persistence")]
-        if let Some(storage) = storage {
+        if let Some(storage) = _storage {
             *self = epi::get_value(storage, epi::APP_KEY).unwrap_or_default()
         }
     }
@@ -114,7 +113,7 @@ impl WrapApp {
         // A menu-bar is a horizontal layout with some special styles applied.
         // egui::menu::bar(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
-            dark_light_mode_switch(ui);
+            egui::widgets::global_dark_light_mode_switch(ui);
 
             ui.checkbox(&mut self.backend_panel.open, "💻 Backend");
             ui.separator();
@@ -222,13 +221,4 @@ fn clock_button(ui: &mut egui::Ui, seconds_since_midnight: f64) -> egui::Respons
     );
 
     ui.add(egui::Button::new(time).text_style(egui::TextStyle::Monospace))
-}
-
-/// Show a button to switch to/from dark/light mode (globally).
-fn dark_light_mode_switch(ui: &mut egui::Ui) {
-    let style: egui::Style = (*ui.ctx().style()).clone();
-    let new_visuals = style.visuals.light_dark_small_toggle_button(ui);
-    if let Some(visuals) = new_visuals {
-        ui.ctx().set_visuals(visuals);
-    }
 }

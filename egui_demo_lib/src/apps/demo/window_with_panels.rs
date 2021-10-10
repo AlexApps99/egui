@@ -1,5 +1,5 @@
 #[derive(Clone, PartialEq, Default)]
-#[cfg_attr(feature = "persistence", derive(serde::Deserialize, serde::Serialize))]
+#[cfg_attr(feature = "serde", derive(serde::Deserialize, serde::Serialize))]
 pub struct WindowWithPanels {}
 
 impl super::Demo for WindowWithPanels {
@@ -8,7 +8,7 @@ impl super::Demo for WindowWithPanels {
     }
 
     fn show(&mut self, ctx: &egui::CtxRef, open: &mut bool) {
-        use super::View;
+        use super::View as _;
         let window = egui::Window::new("Window with Panels")
             .default_width(600.0)
             .default_height(400.0)

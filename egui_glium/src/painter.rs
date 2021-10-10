@@ -50,7 +50,7 @@ fn srgbtexture2d(gl: &glow::Context, data: &[u8], w: usize, h: usize) -> glow::N
             glow::PixelUnpackData::Slice(data),
         );
 
-        assert_eq!(gl.get_error(), glow::NO_ERROR);
+        assert_eq!(gl.get_error(), glow::NO_ERROR, "OpenGL error occurred!");
         tex
     }
 }
@@ -169,7 +169,6 @@ impl Painter {
         v_src.push_str(VERT_SRC);
         let mut f_src = header.to_owned();
         f_src.push_str(FRAG_SRC);
-        // TODO error handling
         unsafe {
             let v = gl.create_shader(glow::VERTEX_SHADER).unwrap();
             gl.shader_source(v, &v_src);
@@ -246,7 +245,7 @@ impl Painter {
                 offset_of!(Vertex, color) as i32,
             );
             gl.enable_vertex_attrib_array(a_srgba_loc);
-            assert_eq!(gl.get_error(), glow::NO_ERROR);
+            assert_eq!(gl.get_error(), glow::NO_ERROR, "OpenGL error occurred!");
 
             Painter {
                 program,
@@ -331,6 +330,7 @@ impl Painter {
         gl.bind_vertex_array(Some(self.vertex_array));
         gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
         gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.element_array_buffer));
+
         (width_in_pixels, height_in_pixels)
     }
 
@@ -372,7 +372,11 @@ impl Painter {
             self.paint_mesh(gl, size_in_pixels, pixels_per_point, clip_rect, &mesh)
         }
 
-        assert_eq!(unsafe { gl.get_error() }, glow::NO_ERROR);
+        assert_eq!(
+            unsafe { gl.get_error() },
+            glow::NO_ERROR,
+            "OpenGL error occurred!"
+        );
     }
 
     #[inline(never)] // Easier profiling

@@ -48,9 +48,7 @@ impl epi::TextureAllocator for Painter {
 
 struct RequestRepaintEvent;
 
-struct GlowRepaintSignal(
-    std::sync::Mutex<glutin::event_loop::EventLoopProxy<RequestRepaintEvent>>,
-);
+struct GlowRepaintSignal(std::sync::Mutex<glutin::event_loop::EventLoopProxy<RequestRepaintEvent>>);
 
 impl epi::RepaintSignal for GlowRepaintSignal {
     fn request_repaint(&self) {

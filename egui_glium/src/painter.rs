@@ -265,7 +265,7 @@ impl Painter {
     }
 
     pub fn upload_egui_texture(&mut self, gl: &glow::Context, texture: &egui::Texture) {
-        self.assert_destroyed();
+        self.assert_not_destroyed();
 
         if self.egui_texture_version == Some(texture.version) {
             return; // No change
@@ -362,7 +362,7 @@ impl Painter {
         clipped_meshes: Vec<egui::ClippedMesh>,
         egui_texture: &egui::Texture,
     ) {
-        self.assert_destroyed();
+        self.assert_not_destroyed();
 
         self.upload_egui_texture(gl, egui_texture);
         self.upload_pending_user_textures(gl);
@@ -445,7 +445,7 @@ impl Painter {
     // No need to implement this in your egui integration!
 
     pub fn alloc_user_texture(&mut self) -> egui::TextureId {
-        self.assert_destroyed();
+        self.assert_not_destroyed();
 
         for (i, tex) in self.user_textures.iter_mut().enumerate() {
             if tex.is_none() {
@@ -461,7 +461,7 @@ impl Painter {
     /// register glow texture as egui texture
     /// Usable for render to image rectangle
     pub fn register_glow_texture(&mut self, texture: glow::NativeTexture) -> egui::TextureId {
-        self.assert_destroyed();
+        self.assert_not_destroyed();
 
         let id = self.alloc_user_texture();
         if let egui::TextureId::User(id) = id {
@@ -490,7 +490,7 @@ impl Painter {
         size: (usize, usize),
         pixels: &[Color32],
     ) {
-        self.assert_destroyed();
+        self.assert_not_destroyed();
 
         assert_eq!(
             size.0 * size.1,
@@ -523,7 +523,7 @@ impl Painter {
     }
 
     pub fn free_user_texture(&mut self, id: egui::TextureId) {
-        self.assert_destroyed();
+        self.assert_not_destroyed();
 
         if let egui::TextureId::User(id) = id {
             let index = id as usize;
@@ -534,7 +534,7 @@ impl Painter {
     }
 
     pub fn get_texture(&self, texture_id: egui::TextureId) -> Option<glow::NativeTexture> {
-        self.assert_destroyed();
+        self.assert_not_destroyed();
 
         match texture_id {
             egui::TextureId::Egui => self.egui_texture,
@@ -543,7 +543,7 @@ impl Painter {
     }
 
     pub fn upload_pending_user_textures(&mut self, gl: &glow::Context) {
-        self.assert_destroyed();
+        self.assert_not_destroyed();
 
         for user_texture in self.user_textures.iter_mut().flatten() {
             if user_texture.gl_texture.is_none() {
@@ -601,14 +601,14 @@ impl Painter {
     }
 
     #[cfg(debug_assertions)]
-    fn assert_destroyed(&self) {
+    fn assert_not_destroyed(&self) {
         assert!(!self.destroyed, "egui has already been destroyed!");
     }
 
     #[inline(always)]
     #[cfg(not(debug_assertions))]
     #[allow(clippy::unused_self)]
-    fn assert_destroyed(&self) {}
+    fn assert_not_destroyed(&self) {}
 }
 
 impl Drop for Painter {

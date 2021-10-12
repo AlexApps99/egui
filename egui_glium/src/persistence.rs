@@ -6,7 +6,7 @@ use std::{
 // ----------------------------------------------------------------------------
 
 /// A key-value store backed by a [RON](https://github.com/ron-rs/ron) file on disk.
-/// Used to restore egui state, glow window position/size and app state.
+/// Used to restore egui state, native window position/size and app state.
 pub struct FileStorage {
     path: PathBuf,
     kv: HashMap<String, String>,

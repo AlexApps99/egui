@@ -146,7 +146,7 @@ impl ShaderVersion {
 
 #[test]
 fn test_shader_version() {
-    use ShaderVersion::*;
+    use ShaderVersion::{Es100, Es300, Gl120, Gl140};
     for (s, v) in [
         ("1.2 OpenGL foo bar", Gl120),
         ("3.0", Gl140),
